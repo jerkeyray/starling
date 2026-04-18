@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 
 	oai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -241,12 +242,17 @@ func paramsFromCBOR(raw cborenc.RawMessage) ([]option.RequestOption, error) {
 		"stream":         {},
 		"stream_options": {},
 	}
-	opts := make([]option.RequestOption, 0, len(m))
-	for k, v := range m {
+	keys := make([]string, 0, len(m))
+	for k := range m {
 		if _, skip := reserved[k]; skip {
 			continue
 		}
-		opts = append(opts, option.WithJSONSet(k, v))
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	opts := make([]option.RequestOption, 0, len(keys))
+	for _, k := range keys {
+		opts = append(opts, option.WithJSONSet(k, m[k]))
 	}
 	return opts, nil
 }

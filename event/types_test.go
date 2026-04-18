@@ -75,7 +75,7 @@ func TestPayload_RoundTrip(t *testing.T) {
 			TurnID: "turn-1",
 			Text:   "Here is the summary.",
 			ToolUses: []event.PlannedToolUse{
-				{CallID: "call-1", Tool: "fetch", Args: mustRaw(t, map[string]any{"url": "https://example.com"})},
+				{CallID: "call-1", ToolName: "fetch", Args: mustRaw(t, map[string]any{"url": "https://example.com"})},
 			},
 			StopReason:        "end_turn",
 			InputTokens:       250,
@@ -92,7 +92,7 @@ func TestPayload_RoundTrip(t *testing.T) {
 		assertRoundTrip(t, event.ToolCallScheduled{
 			CallID:   "call-1",
 			TurnID:   "turn-1",
-			Tool:     "fetch",
+			ToolName: "fetch",
 			Args:     mustRaw(t, map[string]any{"url": "https://example.com"}),
 			Attempt:  1,
 			IdempKey: "idem-xyz",

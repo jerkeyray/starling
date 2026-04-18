@@ -28,9 +28,9 @@ type BudgetLimits struct {
 // turn. Args hold the raw CBOR-encoded argument object so downstream events
 // can reference them without re-encoding.
 type PlannedToolUse struct {
-	CallID string             `cbor:"call_id"`
-	Tool   string             `cbor:"tool"`
-	Args   cborenc.RawMessage `cbor:"args"`
+	CallID   string             `cbor:"call_id"`
+	ToolName string             `cbor:"tool"`
+	Args     cborenc.RawMessage `cbor:"args"`
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ type AssistantMessageCompleted struct {
 type ToolCallScheduled struct {
 	CallID   string             `cbor:"call_id"`
 	TurnID   string             `cbor:"turn_id"`
-	Tool     string             `cbor:"tool"`
+	ToolName string             `cbor:"tool"`
 	Args     cborenc.RawMessage `cbor:"args"`
 	Attempt  uint32             `cbor:"attempt"`
 	IdempKey string             `cbor:"idemp_key,omitempty"`

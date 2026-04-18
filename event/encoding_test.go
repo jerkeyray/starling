@@ -58,7 +58,7 @@ func TestAs_SuccessEachKind(t *testing.T) {
 	ts := event.TurnStarted{TurnID: "t1", PromptHash: []byte{5}, InputTokens: 1}
 	re := event.ReasoningEmitted{TurnID: "t1", Content: "r", Sensitive: false}
 	am := event.AssistantMessageCompleted{TurnID: "t1", Text: "hi", StopReason: "end", InputTokens: 1, OutputTokens: 1, CostUSD: 0.001, RawResponseHash: []byte{6}}
-	tcs := event.ToolCallScheduled{CallID: "c1", TurnID: "t1", Tool: "fetch", Args: emptyMap, Attempt: 1}
+	tcs := event.ToolCallScheduled{CallID: "c1", TurnID: "t1", ToolName: "fetch", Args: emptyMap, Attempt: 1}
 	tcc := event.ToolCallCompleted{CallID: "c1", Result: emptyMap, DurationMs: 1, Attempt: 1}
 	tcf := event.ToolCallFailed{CallID: "c1", Error: "e", ErrorType: "timeout", DurationMs: 1, Attempt: 1}
 	se := event.SideEffectRecorded{Name: "now", Value: mustRaw(t, int64(1700000000))}

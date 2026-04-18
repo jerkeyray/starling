@@ -2,7 +2,6 @@ package openai
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -98,11 +97,11 @@ func (s *openaiStream) handleChunk(chunk oai.ChatCompletionChunk) {
 		}
 	}
 
-	// Contribute to RawResponseHash. json.Marshal on the value round-trips
-	// through the SDK's field tags; this is reproducible so replay can
-	// compare hashes.
-	if b, err := json.Marshal(chunk); err == nil {
-		_, _ = s.rawHash.Write(b)
+	// Contribute to RawResponseHash using the SDK's unmodified wire bytes.
+	// That keeps the hash reproducible across SDK versions — two replays of
+	// the same server response produce the same digest.
+	if raw := chunk.RawJSON(); raw != "" {
+		_, _ = s.rawHash.Write([]byte(raw))
 	}
 
 	// Terminal usage chunk: empty Choices + populated Usage.
