@@ -1,0 +1,85 @@
+# Compiled binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Go test + coverage output
+*.test
+*.out
+*.prof
+coverage.*
+*.cover
+profile.cov
+
+# Go workspaces (opt in per-repo; never commit)
+go.work
+go.work.sum
+
+# Go module cache / build cache (should never be in repo but guard anyway)
+vendor/
+
+# Event log artifacts (SQLite backend default)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+/tmp/
+/data/
+
+# Env + secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# macOS
+.AppleDouble
+.LSOverride
+._*
+
+# AI agents / assistants — all per-user, never committed
+# Claude Code
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+# Aider
+.aider*
+# Continue.dev
+.continue/
+# Windsurf
+.windsurfrules
+.windsurf/
+# Codeium
+.codeium/
+# GitHub Copilot workspace
+.copilot/
+# Generic agent scratch
+AGENTS.md
+.agent/
+.agents/
+
+# Local dev scratch
+scratch/
+tmp/
+.tmp/
+temp_notes
