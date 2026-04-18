@@ -49,7 +49,7 @@ func TestHash_Distinguishes(t *testing.T) {
 	}
 }
 
-// stubEvent stands in for the real Event envelope, which lands in T3. It has
+// stubEvent stands in for the Event envelope in chain-primitive tests. It has
 // enough shape to exercise the chain: a sequence number, a PrevHash slot
 // filled by the caller, and some body bytes that change per event.
 type stubEvent struct {

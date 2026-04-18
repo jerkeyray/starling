@@ -9,6 +9,12 @@ package cborenc
 
 import "github.com/fxamacker/cbor/v2"
 
+// RawMessage is a CBOR value held as verbatim bytes. Re-exported from
+// fxamacker/cbor/v2 so callers never import that package directly — it is
+// the one type (not a function) that must cross the cborenc boundary in
+// order for event payloads to round-trip without re-encoding.
+type RawMessage = cbor.RawMessage
+
 var (
 	enc cbor.EncMode
 	dec cbor.DecMode

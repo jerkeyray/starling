@@ -1,0 +1,241 @@
+package event
+
+import "github.com/jerkeyray/starling/internal/cborenc"
+
+// ---------------------------------------------------------------------------
+// Shared helper types
+// ---------------------------------------------------------------------------
+
+// ToolSchemaRef pins a tool name to the hash of its JSON Schema at run start.
+// Used inside RunStarted so a later replay can detect silent tool-schema
+// changes.
+type ToolSchemaRef struct {
+	Name       string `cbor:"name"`
+	SchemaHash []byte `cbor:"schema_hash"`
+}
+
+// BudgetLimits mirrors the Budget struct the user set on Agent, captured into
+// RunStarted so the log self-describes the limits enforcement was run under.
+// All fields are optional; zero = no limit on that axis.
+type BudgetLimits struct {
+	MaxInputTokens  int64   `cbor:"max_input_tokens,omitempty"`
+	MaxOutputTokens int64   `cbor:"max_output_tokens,omitempty"`
+	MaxUSD          float64 `cbor:"max_usd,omitempty"`
+	MaxWallClockMs  int64   `cbor:"max_wall_clock_ms,omitempty"`
+}
+
+// PlannedToolUse describes a tool invocation the assistant requested during a
+// turn. Args hold the raw CBOR-encoded argument object so downstream events
+// can reference them without re-encoding.
+type PlannedToolUse struct {
+	CallID string             `cbor:"call_id"`
+	Tool   string             `cbor:"tool"`
+	Args   cborenc.RawMessage `cbor:"args"`
+}
+
+// ---------------------------------------------------------------------------
+// 1. RunStarted
+// ---------------------------------------------------------------------------
+
+// RunStarted is the first event of every run. It pins the schema version,
+// goal, provider, model, params, system prompt, tool registry, and budget so
+// the run is self-describing for replay and audit.
+type RunStarted struct {
+	SchemaVersion    uint32             `cbor:"schema_version"`
+	Goal             string             `cbor:"goal"`
+	ProviderID       string             `cbor:"provider_id"`
+	ModelID          string             `cbor:"model_id"`
+	APIVersion       string             `cbor:"api_version"`
+	ParamsHash       []byte             `cbor:"params_hash"`
+	Params           cborenc.RawMessage `cbor:"params"`
+	SystemPromptHash []byte             `cbor:"system_prompt_hash"`
+	SystemPrompt     string             `cbor:"system_prompt"`
+	ToolRegistryHash []byte             `cbor:"tool_registry_hash"`
+	ToolSchemas      []ToolSchemaRef    `cbor:"tool_schemas"`
+	Budget           *BudgetLimits      `cbor:"budget,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// 2. UserMessageAppended
+// ---------------------------------------------------------------------------
+
+// UserMessageAppended records a new user message injected into an in-progress
+// run (typically during Resume).
+type UserMessageAppended struct {
+	Content string `cbor:"content"`
+}
+
+// ---------------------------------------------------------------------------
+// 3. TurnStarted
+// ---------------------------------------------------------------------------
+
+// TurnStarted marks the beginning of an LLM turn, carrying the prompt hash
+// and input-token count computed pre-call.
+type TurnStarted struct {
+	TurnID      string `cbor:"turn_id"`
+	PromptHash  []byte `cbor:"prompt_hash"`
+	InputTokens int64  `cbor:"input_tokens"`
+}
+
+// ---------------------------------------------------------------------------
+// 4. ReasoningEmitted
+// ---------------------------------------------------------------------------
+
+// ReasoningEmitted records provider-supplied reasoning (e.g. Anthropic
+// extended thinking). Sensitive=true flags content the caller may want to
+// redact on display.
+type ReasoningEmitted struct {
+	TurnID    string `cbor:"turn_id"`
+	Content   string `cbor:"content"`
+	Sensitive bool   `cbor:"sensitive"`
+}
+
+// ---------------------------------------------------------------------------
+// 5. AssistantMessageCompleted
+// ---------------------------------------------------------------------------
+
+// AssistantMessageCompleted is the successful terminal event of a turn. It
+// captures the full assistant output plus authoritative token counts, cost,
+// and a hash of the raw provider response.
+type AssistantMessageCompleted struct {
+	TurnID            string             `cbor:"turn_id"`
+	Text              string             `cbor:"text"`
+	ToolUses          []PlannedToolUse   `cbor:"tool_uses,omitempty"`
+	StopReason        string             `cbor:"stop_reason"`
+	InputTokens       int64              `cbor:"input_tokens"`
+	OutputTokens      int64              `cbor:"output_tokens"`
+	CacheReadTokens   int64              `cbor:"cache_read_tokens,omitempty"`
+	CacheCreateTokens int64              `cbor:"cache_create_tokens,omitempty"`
+	CostUSD           float64            `cbor:"cost_usd"`
+	RawResponseHash   []byte             `cbor:"raw_response_hash"`
+	ProviderRequestID string             `cbor:"provider_request_id,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// 6. ToolCallScheduled
+// ---------------------------------------------------------------------------
+
+// ToolCallScheduled is emitted immediately before a tool is invoked. Attempt
+// starts at 1 and increments on retries; IdempKey is optional but recommended
+// for non-idempotent side effects.
+type ToolCallScheduled struct {
+	CallID   string             `cbor:"call_id"`
+	TurnID   string             `cbor:"turn_id"`
+	Tool     string             `cbor:"tool"`
+	Args     cborenc.RawMessage `cbor:"args"`
+	Attempt  uint32             `cbor:"attempt"`
+	IdempKey string             `cbor:"idemp_key,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// 7. ToolCallCompleted
+// ---------------------------------------------------------------------------
+
+// ToolCallCompleted captures a successful tool invocation. The CallID and
+// Attempt must match the ToolCallScheduled that initiated it.
+type ToolCallCompleted struct {
+	CallID     string             `cbor:"call_id"`
+	Result     cborenc.RawMessage `cbor:"result"`
+	DurationMs int64              `cbor:"duration_ms"`
+	Attempt    uint32             `cbor:"attempt"`
+}
+
+// ---------------------------------------------------------------------------
+// 8. ToolCallFailed
+// ---------------------------------------------------------------------------
+
+// ToolCallFailed captures a failed tool invocation. ErrorType classifies the
+// failure (e.g. "panic", "timeout", "schema_violation").
+type ToolCallFailed struct {
+	CallID     string `cbor:"call_id"`
+	Error      string `cbor:"error"`
+	ErrorType  string `cbor:"error_type"`
+	DurationMs int64  `cbor:"duration_ms"`
+	Attempt    uint32 `cbor:"attempt"`
+}
+
+// ---------------------------------------------------------------------------
+// 9. SideEffectRecorded
+// ---------------------------------------------------------------------------
+
+// SideEffectRecorded captures a non-deterministic value consumed by the agent
+// loop — wall clock readings (step.Now), random draws (step.Random), or
+// user-supplied side effects (step.SideEffect). On replay the recorded Value
+// is returned instead of re-running the effect.
+type SideEffectRecorded struct {
+	Name  string             `cbor:"name"`
+	Value cborenc.RawMessage `cbor:"value"`
+}
+
+// ---------------------------------------------------------------------------
+// 10. BudgetExceeded
+// ---------------------------------------------------------------------------
+
+// BudgetExceeded is emitted when the runtime cancels work because a budget
+// cap was reached. Limit identifies which cap ("input_tokens", "output_tokens",
+// "usd", "wall_clock"); Where distinguishes pre-call vs mid-stream enforcement.
+type BudgetExceeded struct {
+	Limit         string  `cbor:"limit"`
+	Cap           float64 `cbor:"cap"`
+	Actual        float64 `cbor:"actual"`
+	Where         string  `cbor:"where"`
+	TurnID        string  `cbor:"turn_id,omitempty"`
+	CallID        string  `cbor:"call_id,omitempty"`
+	PartialText   string  `cbor:"partial_text,omitempty"`
+	PartialTokens int64   `cbor:"partial_tokens,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// 11. ContextTruncated
+// ---------------------------------------------------------------------------
+
+// ContextTruncated records context-window management trimming prior messages.
+// Strategy names the approach used (e.g. "drop_oldest", "summarize").
+type ContextTruncated struct {
+	Strategy        string `cbor:"strategy"`
+	TokensBefore    int64  `cbor:"tokens_before"`
+	TokensAfter     int64  `cbor:"tokens_after"`
+	MessagesBefore  uint32 `cbor:"messages_before"`
+	MessagesAfter   uint32 `cbor:"messages_after"`
+}
+
+// ---------------------------------------------------------------------------
+// 12. RunCompleted (terminal)
+// ---------------------------------------------------------------------------
+
+// RunCompleted is the successful terminal event of a run. MerkleRoot commits
+// to every event before it — tampering with any prior event breaks the root.
+type RunCompleted struct {
+	FinalText         string  `cbor:"final_text"`
+	TurnCount         uint32  `cbor:"turn_count"`
+	ToolCallCount     uint32  `cbor:"tool_call_count"`
+	TotalCostUSD      float64 `cbor:"total_cost_usd"`
+	TotalInputTokens  int64   `cbor:"total_input_tokens"`
+	TotalOutputTokens int64   `cbor:"total_output_tokens"`
+	DurationMs        int64   `cbor:"duration_ms"`
+	MerkleRoot        []byte  `cbor:"merkle_root"`
+}
+
+// ---------------------------------------------------------------------------
+// 13. RunFailed (terminal)
+// ---------------------------------------------------------------------------
+
+// RunFailed is the failure terminal event. ErrorType classifies the failure.
+type RunFailed struct {
+	Error      string `cbor:"error"`
+	ErrorType  string `cbor:"error_type"`
+	MerkleRoot []byte `cbor:"merkle_root"`
+	DurationMs int64  `cbor:"duration_ms"`
+}
+
+// ---------------------------------------------------------------------------
+// 14. RunCancelled (terminal)
+// ---------------------------------------------------------------------------
+
+// RunCancelled is the cancellation terminal event. Reason describes why
+// (e.g. "context_canceled", "user_cancel").
+type RunCancelled struct {
+	Reason     string `cbor:"reason"`
+	MerkleRoot []byte `cbor:"merkle_root"`
+	DurationMs int64  `cbor:"duration_ms"`
+}
