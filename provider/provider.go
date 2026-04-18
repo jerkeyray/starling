@@ -99,6 +99,24 @@ type ToolResult struct {
 	IsError bool
 }
 
+// Response is the aggregated outcome of a streaming completion. The step
+// package assembles this from the chunk stream and returns it to callers
+// so they don't have to re-parse the event log.
+//
+// ToolUses carries the planned tool calls with Args as JSON — callers
+// (typically the agent loop) pass CallID/Name/Args through to
+// step.CallTool, which handles the JSON→CBOR conversion for the event
+// log.
+type Response struct {
+	Text            string
+	ToolUses        []ToolUse
+	StopReason      string
+	Usage           UsageUpdate
+	CostUSD         float64
+	RawResponseHash []byte
+	ProviderReqID   string
+}
+
 // EventStream delivers StreamChunks from a provider. Next returns io.EOF
 // when the stream is complete. Callers must Close the stream when done,
 // whether or not EOF was reached.
