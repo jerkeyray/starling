@@ -153,6 +153,51 @@ func buildParams(req *provider.Request) (oai.ChatCompletionNewParams, error) {
 		}
 	}
 
+	// Promoted first-class fields. TopK has no OpenAI equivalent and is
+	// intentionally ignored; MaxOutputTokens uses max_completion_tokens
+	// since it's the forward-compatible field for o-series / GPT-5 and
+	// also accepted by chat models. Callers who need legacy max_tokens
+	// can still route through Params.
+	if req.MaxOutputTokens > 0 {
+		params.MaxCompletionTokens = param.NewOpt(int64(req.MaxOutputTokens))
+	}
+	if len(req.StopSequences) > 0 {
+		if len(req.StopSequences) == 1 {
+			params.Stop = oai.ChatCompletionNewParamsStopUnion{
+				OfString: param.NewOpt(req.StopSequences[0]),
+			}
+		} else {
+			params.Stop = oai.ChatCompletionNewParamsStopUnion{
+				OfStringArray: req.StopSequences,
+			}
+		}
+	}
+	if tc := req.ToolChoice; tc != "" {
+		switch tc {
+		case "auto", "none":
+			params.ToolChoice = oai.ChatCompletionToolChoiceOptionUnionParam{
+				OfAuto: param.NewOpt(tc),
+			}
+		case "any":
+			// Anthropic uses "any" to mean "must call a tool"; OpenAI's
+			// equivalent is "required". Translate for portability.
+			params.ToolChoice = oai.ChatCompletionToolChoiceOptionUnionParam{
+				OfAuto: param.NewOpt("required"),
+			}
+		case "required":
+			params.ToolChoice = oai.ChatCompletionToolChoiceOptionUnionParam{
+				OfAuto: param.NewOpt("required"),
+			}
+		default:
+			// Specific tool name: pin a function choice.
+			params.ToolChoice = oai.ChatCompletionToolChoiceOptionUnionParam{
+				OfFunctionToolChoice: &oai.ChatCompletionNamedToolChoiceParam{
+					Function: oai.ChatCompletionNamedToolChoiceFunctionParam{Name: tc},
+				},
+			}
+		}
+	}
+
 	return params, nil
 }
 
@@ -240,11 +285,14 @@ func paramsFromCBOR(raw cborenc.RawMessage) ([]option.RequestOption, error) {
 		return nil, err
 	}
 	reserved := map[string]struct{}{
-		"model":          {},
-		"messages":       {},
-		"tools":          {},
-		"stream":         {},
-		"stream_options": {},
+		"model":                 {},
+		"messages":              {},
+		"tools":                 {},
+		"stream":                {},
+		"stream_options":        {},
+		"tool_choice":           {},
+		"stop":                  {},
+		"max_completion_tokens": {},
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {

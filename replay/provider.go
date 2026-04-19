@@ -128,10 +128,31 @@ func groupByTurn(events []event.Event) ([]turnEvents, error) {
 func buildChunks(t turnEvents) ([]provider.StreamChunk, error) {
 	var chunks []provider.StreamChunk
 	for _, r := range t.reasoning {
-		chunks = append(chunks, provider.StreamChunk{
-			Kind: provider.ChunkReasoning,
-			Text: r.Content,
-		})
+		if r.Redacted {
+			// Redacted-thinking: one self-contained chunk carrying the
+			// opaque payload and signature together.
+			chunks = append(chunks, provider.StreamChunk{
+				Kind:      provider.ChunkRedactedThinking,
+				Text:      r.Content,
+				Signature: r.Signature,
+			})
+			continue
+		}
+		if r.Content != "" {
+			chunks = append(chunks, provider.StreamChunk{
+				Kind: provider.ChunkReasoning,
+				Text: r.Content,
+			})
+		}
+		if len(r.Signature) > 0 {
+			// Trailing signature-carrying chunk closes the thinking
+			// block; step.LLMCall flushes the accumulated text + this
+			// signature as a single ReasoningEmitted event.
+			chunks = append(chunks, provider.StreamChunk{
+				Kind:      provider.ChunkReasoning,
+				Signature: r.Signature,
+			})
+		}
 	}
 	if t.message.Text != "" {
 		chunks = append(chunks, provider.StreamChunk{

@@ -84,10 +84,23 @@ type TurnStarted struct {
 // ReasoningEmitted records provider-supplied reasoning (e.g. Anthropic
 // extended thinking). Sensitive=true flags content the caller may want to
 // redact on display.
+//
+// Signature carries Anthropic's per-block integrity signature: on a
+// standard thinking block it is produced by the trailing signature_delta
+// event, on a redacted_thinking block it accompanies the opaque payload.
+// The signature must be replayed verbatim back to Anthropic on subsequent
+// turns for the server to accept the assistant message, so it is
+// recorded here to keep replays byte-faithful.
+//
+// Redacted=true marks a redacted_thinking block: Content holds the opaque
+// payload the server returned (not plaintext reasoning) and must also
+// round-trip unchanged. OpenAI adapters never set Signature or Redacted.
 type ReasoningEmitted struct {
 	TurnID    string `cbor:"turn_id"`
 	Content   string `cbor:"content"`
 	Sensitive bool   `cbor:"sensitive"`
+	Signature []byte `cbor:"signature,omitempty"`
+	Redacted  bool   `cbor:"redacted,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

@@ -52,12 +52,42 @@ func (r Role) String() string { return string(r) }
 
 // Request is the input to Provider.Stream. All fields are read-only for
 // the duration of the call; adapters must not mutate them.
+//
+// ToolChoice, StopSequences, TopK, and MaxOutputTokens are promoted to
+// first-class fields because both in-tree providers honour them and
+// callers hit them within a week of trying anything non-trivial.
+// Vendor-only knobs continue to ride on Params.
 type Request struct {
 	Model        string
 	SystemPrompt string
 	Messages     []Message
 	Tools        []ToolDefinition
-	Params       cborenc.RawMessage // provider-specific (temperature, top_p, ...)
+
+	// ToolChoice controls tool-selection behaviour. Recognised values:
+	// "" (provider default), "auto", "any", "none", or a specific tool
+	// name. Adapters translate to their vendor's shape; unsupported
+	// values are passed through and may surface as provider errors.
+	ToolChoice string
+
+	// StopSequences halts generation when any listed string is
+	// produced. Empty slice = no custom stops. OpenAI maps to `stop`;
+	// Anthropic maps to `stop_sequences`.
+	StopSequences []string
+
+	// TopK caps candidates per sampling step (Anthropic-only today).
+	// Pointer to distinguish unset from 0. OpenAI adapters ignore it.
+	TopK *int
+
+	// MaxOutputTokens caps response tokens. Anthropic requires a
+	// positive value; its adapter substitutes a default when zero.
+	// OpenAI maps to `max_completion_tokens` (new models) or
+	// `max_tokens` (legacy).
+	MaxOutputTokens int
+
+	// Params carries vendor-specific request fields that haven't been
+	// promoted to first-class. CBOR-encoded so the shape is recorded
+	// verbatim in RunStarted and replayed exactly.
+	Params cborenc.RawMessage
 }
 
 // Message is one entry in the conversation history supplied to the model.
@@ -65,11 +95,18 @@ type Request struct {
 // ToolUses is set when Role=RoleAssistant and the assistant planned one or
 // more tool calls in a prior turn. ToolResult is set when Role=RoleTool
 // and the message carries the result of a tool call back to the model.
+//
+// Annotations carries vendor-specific per-message metadata without
+// leaking the vendor's request shape into the core interface. The
+// Anthropic adapter reads Annotations["cache_control"] (expected shape:
+// map[string]any{"type":"ephemeral","ttl":"5m"|"1h"}) and emits a
+// cache-control block. Unknown keys are ignored by each adapter.
 type Message struct {
-	Role       Role
-	Content    string
-	ToolUses   []ToolUse
-	ToolResult *ToolResult
+	Role        Role
+	Content     string
+	ToolUses    []ToolUse
+	ToolResult  *ToolResult
+	Annotations map[string]any
 }
 
 // ToolDefinition is what the caller advertises to the model: the set of
@@ -134,8 +171,19 @@ type EventStream interface {
 type StreamChunk struct {
 	Kind ChunkKind
 
-	// Text is set on ChunkText and ChunkReasoning.
+	// Text is set on ChunkText, ChunkReasoning, and
+	// ChunkRedactedThinking. For ChunkRedactedThinking, Text carries
+	// the opaque redacted payload that must round-trip verbatim on the
+	// next turn for Anthropic to accept the message.
 	Text string
+
+	// Signature is set on the trailing chunk of a reasoning block
+	// (ChunkReasoning with an otherwise-empty Text) and on
+	// ChunkRedactedThinking. Anthropic requires this signature to be
+	// replayed back with the thinking block on subsequent turns so the
+	// server can verify block integrity. OpenAI adapters never
+	// populate this field.
+	Signature []byte
 
 	// ToolUse is set on ChunkToolUseStart, ChunkToolUseDelta, ChunkToolUseEnd.
 	ToolUse *ToolUseChunk
@@ -162,6 +210,7 @@ type ChunkKind uint8
 const (
 	ChunkText ChunkKind = iota + 1
 	ChunkReasoning
+	ChunkRedactedThinking
 	ChunkToolUseStart
 	ChunkToolUseDelta
 	ChunkToolUseEnd
@@ -177,6 +226,8 @@ func (k ChunkKind) String() string {
 		return "ChunkText"
 	case ChunkReasoning:
 		return "ChunkReasoning"
+	case ChunkRedactedThinking:
+		return "ChunkRedactedThinking"
 	case ChunkToolUseStart:
 		return "ChunkToolUseStart"
 	case ChunkToolUseDelta:

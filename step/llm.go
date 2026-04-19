@@ -103,6 +103,25 @@ func LLMCall(ctx context.Context, req *provider.Request) (*provider.Response, er
 	var uses []*pendingUse
 	useIdx := make(map[string]int)
 
+	// reasoningBuf accumulates thinking_delta text across a block; on the
+	// trailing signature-carrying ChunkReasoning we flush one
+	// ReasoningEmitted so the whole block, signature included, lands as a
+	// single event. flushReasoning emits and resets the buffer.
+	var reasoningBuf bytes.Buffer
+	flushReasoning := func(sig []byte) error {
+		if reasoningBuf.Len() == 0 && len(sig) == 0 {
+			return nil
+		}
+		ev := event.ReasoningEmitted{
+			TurnID:    turnID,
+			Content:   reasoningBuf.String(),
+			Sensitive: true, // per EVENTS.md §3.4: always true for schema symmetry
+			Signature: sig,
+		}
+		reasoningBuf.Reset()
+		return emit(ctx, c, event.KindReasoningEmitted, ev)
+	}
+
 drain:
 	for {
 		chunk, nerr := stream.Next(ctx)
@@ -116,12 +135,28 @@ drain:
 		case provider.ChunkText:
 			textBuf.WriteString(chunk.Text)
 		case provider.ChunkReasoning:
+			// Text-only mid-block chunks: buffer. Signature-carrying
+			// trailing chunk (empty Text): flush as one event.
+			if chunk.Text != "" {
+				reasoningBuf.WriteString(chunk.Text)
+			}
+			if len(chunk.Signature) > 0 {
+				if err := flushReasoning(chunk.Signature); err != nil {
+					return nil, fmt.Errorf("step.LLMCall: emit ReasoningEmitted: %w", err)
+				}
+			}
+		case provider.ChunkRedactedThinking:
+			// Redacted-thinking blocks stand alone: opaque payload +
+			// signature arrive together. Emit directly without using
+			// the thinking-block buffer.
 			if err := emit(ctx, c, event.KindReasoningEmitted, event.ReasoningEmitted{
 				TurnID:    turnID,
 				Content:   chunk.Text,
-				Sensitive: true, // per EVENTS.md §3.4: always true for schema symmetry
+				Sensitive: true,
+				Signature: chunk.Signature,
+				Redacted:  true,
 			}); err != nil {
-				return nil, fmt.Errorf("step.LLMCall: emit ReasoningEmitted: %w", err)
+				return nil, fmt.Errorf("step.LLMCall: emit ReasoningEmitted (redacted): %w", err)
 			}
 		case provider.ChunkToolUseStart:
 			if chunk.ToolUse == nil {
@@ -146,6 +181,12 @@ drain:
 				usage = *chunk.Usage
 			}
 		case provider.ChunkEnd:
+			// Flush any reasoning text that never received a trailing
+			// signature (OpenAI-family reasoning summaries); signature
+			// stays nil.
+			if err := flushReasoning(nil); err != nil {
+				return nil, fmt.Errorf("step.LLMCall: emit ReasoningEmitted: %w", err)
+			}
 			stopReason = chunk.StopReason
 			rawRespHash = chunk.RawResponseHash
 			providerReqID = chunk.ProviderReqID
