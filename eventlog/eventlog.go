@@ -5,9 +5,25 @@ package eventlog
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jerkeyray/starling/event"
 )
+
+// RunSummary is a per-run capsule returned by EventLog.ListRuns. It is
+// deliberately small: enough to populate a "list of runs" view in a
+// debugger or dashboard without loading every event for every run.
+//
+// TerminalKind is the Kind of the run's last event. For an in-progress
+// run the last event will not be terminal; callers should consult
+// Kind.IsTerminal to distinguish "still running" from "ended cleanly /
+// failed / cancelled".
+type RunSummary struct {
+	RunID        string     // The run identifier.
+	StartedAt    time.Time  // Wall-clock timestamp of the first event.
+	LastSeq      uint64     // Sequence number of the most recent event.
+	TerminalKind event.Kind // Kind of the most recent event (terminal or not).
+}
 
 // EventLog is an append-only, per-run ledger of events.
 //
@@ -33,6 +49,13 @@ type EventLog interface {
 	// cancelled, when the log is closed, or when the subscriber falls far
 	// enough behind that its buffer overflows.
 	Stream(ctx context.Context, runID string) (<-chan event.Event, error)
+
+	// ListRuns returns one RunSummary per run present in the log,
+	// ordered by StartedAt descending (newest first). An empty log
+	// returns (nil, nil). Backends should implement this with a single
+	// indexed query — callers may invoke it on every page-load of an
+	// inspector UI.
+	ListRuns(ctx context.Context) ([]RunSummary, error)
 
 	// Close releases all resources and closes every live subscriber
 	// channel. Idempotent.

@@ -209,4 +209,7 @@ func (f *failingLog) Read(ctx context.Context, runID string) ([]event.Event, err
 func (f *failingLog) Stream(ctx context.Context, runID string) (<-chan event.Event, error) {
 	return f.inner.Stream(ctx, runID)
 }
+func (f *failingLog) ListRuns(ctx context.Context) ([]eventlog.RunSummary, error) {
+	return f.inner.ListRuns(ctx)
+}
 func (f *failingLog) Close() error { return f.inner.Close() }

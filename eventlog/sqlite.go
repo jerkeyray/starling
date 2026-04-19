@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -289,6 +290,68 @@ func (s *sqliteLog) streamLoop(ctx context.Context, runID string, ch chan<- even
 			}
 		}
 	}
+}
+
+// ListRuns enumerates every run in the database. One indexed query
+// over the (run_id, seq) primary key picks the first and last seq per
+// run; a second query fetches the matching timestamps and kinds. The
+// result is sorted newest-first by StartedAt.
+func (s *sqliteLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, ErrLogClosed
+	}
+	s.mu.RUnlock()
+
+	// One pass: per run_id, get min(seq) for "started" and max(seq) for
+	// "last", then join back to events to pull ts (for first) and kind
+	// (for last). A correlated subquery is simplest and the (run_id, seq)
+	// PK index covers both lookups.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			run_id,
+			(SELECT ts   FROM events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
+			MAX(seq) AS last_seq,
+			(SELECT kind FROM events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind
+		FROM events e
+		GROUP BY run_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("eventlog/sqlite: list runs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RunSummary
+	for rows.Next() {
+		var (
+			runID    string
+			startedTs int64
+			lastSeq  int64
+			lastKind int64
+		)
+		if err := rows.Scan(&runID, &startedTs, &lastSeq, &lastKind); err != nil {
+			return nil, fmt.Errorf("eventlog/sqlite: list runs scan: %w", err)
+		}
+		out = append(out, RunSummary{
+			RunID:        runID,
+			StartedAt:    time.Unix(0, startedTs),
+			LastSeq:      uint64(lastSeq),
+			TerminalKind: event.Kind(lastKind),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("eventlog/sqlite: list runs rows: %w", err)
+	}
+	// Newest first.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].StartedAt.After(out[j].StartedAt)
+	})
+	return out, nil
 }
 
 func (s *sqliteLog) Close() error {

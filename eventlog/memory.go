@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/jerkeyray/starling/event"
 )
@@ -191,6 +193,38 @@ func (m *memoryLog) Stream(ctx context.Context, runID string) (<-chan event.Even
 	}()
 
 	return ch, nil
+}
+
+func (m *memoryLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.closed {
+		return nil, ErrLogClosed
+	}
+
+	out := make([]RunSummary, 0, len(m.runs))
+	for runID, rs := range m.runs {
+		if len(rs.events) == 0 {
+			continue
+		}
+		first := rs.events[0]
+		last := rs.events[len(rs.events)-1]
+		out = append(out, RunSummary{
+			RunID:        runID,
+			StartedAt:    time.Unix(0, first.Timestamp),
+			LastSeq:      last.Seq,
+			TerminalKind: last.Kind,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].StartedAt.After(out[j].StartedAt)
+	})
+	return out, nil
 }
 
 func (m *memoryLog) Close() error {
