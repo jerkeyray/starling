@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -33,11 +34,25 @@ type ToolResult struct {
 // Callers typically populate ToolCall from a provider.ToolUse returned
 // by LLMCall. CallID empty => a ULID is minted; TurnID is not defaulted
 // because a missing TurnID is almost always a caller bug.
+//
+// Retry: set Idempotent: true and MaxAttempts > 1 to enable retry on
+// transient failures (errors matching tool.ErrTransient via errors.Is).
+// Each retry emits a fresh ToolCallScheduled{Attempt: n} before the
+// call, and ToolCallCompleted/Failed{Attempt: n} after. Backoff
+// controls the sleep between attempts; nil selects an exponential
+// default (100ms base, doubling, cap 10s, 0–25% jitter). Non-idempotent
+// calls run exactly once regardless of MaxAttempts. Callers should set
+// Idempotent only for operations they're comfortable re-executing
+// (pure reads, side-effect-free queries, or operations with caller-
+// supplied idempotency keys).
 type ToolCall struct {
-	CallID string
-	TurnID string
-	Name   string
-	Args   json.RawMessage
+	CallID      string
+	TurnID      string
+	Name        string
+	Args        json.RawMessage
+	Idempotent  bool
+	MaxAttempts int
+	Backoff     func(attempt int) time.Duration
 }
 
 // CallTool invokes the named tool against the Registry configured on
@@ -51,6 +66,11 @@ type ToolCall struct {
 //   - any other error returned by the tool    → "tool"
 //
 // M3's watchdog will add "timeout".
+//
+// When ToolCall opts into retry (Idempotent + MaxAttempts>1), every
+// attempt emits its own Scheduled + Completed/Failed pair carrying
+// Attempt: n. Retry happens only on tool.ErrTransient; ctx errors and
+// ErrToolNotFound are always terminal.
 //
 // Panics if ctx has no step.Context attached.
 func CallTool(ctx context.Context, call ToolCall) (json.RawMessage, error) {
@@ -79,44 +99,7 @@ func CallTool(ctx context.Context, call ToolCall) (json.RawMessage, error) {
 		return nil, fmt.Errorf("step.CallTool(%q): emit Scheduled: %w", call.Name, err)
 	}
 
-	reg := c.registry()
-	if reg == nil {
-		return nil, emitToolFailed(ctx, c, call.CallID, ErrToolNotFound, "tool", 0)
-	}
-	tl, ok := reg.Get(call.Name)
-	if !ok {
-		wrapped := fmt.Errorf("%w: %s", ErrToolNotFound, call.Name)
-		return nil, emitToolFailed(ctx, c, call.CallID, wrapped, "tool", 0)
-	}
-
-	start := time.Now()
-	result, execErr := runToolSafely(ctx, tl, call.Args)
-	// Wall-clock durations don't survive replay; substitute the recorded
-	// value when we're verifying a log so emit-compare stays byte-exact.
-	durMs := ReplayDurationMs(ctx, time.Since(start).Milliseconds())
-
-	if execErr == nil {
-		resultRaw := result
-		if len(resultRaw) == 0 {
-			resultRaw = json.RawMessage("null")
-		}
-		resultCBOR, cerr := jsonToCanonicalCBOR(resultRaw)
-		if cerr != nil {
-			return result, fmt.Errorf("step.CallTool(%q): encode result: %w", call.Name, cerr)
-		}
-		if err := emit(ctx, c, event.KindToolCallCompleted, event.ToolCallCompleted{
-			CallID:     call.CallID,
-			Result:     resultCBOR,
-			DurationMs: durMs,
-			Attempt:    1,
-		}); err != nil {
-			return result, fmt.Errorf("step.CallTool(%q): emit Completed: %w", call.Name, err)
-		}
-		return result, nil
-	}
-
-	errType := classifyToolError(ctx, execErr)
-	return nil, emitToolFailed(ctx, c, call.CallID, execErr, errType, durMs)
+	return executeOne(ctx, c, call)
 }
 
 // runToolSafely invokes tl.Execute and converts a panic into an error
@@ -168,10 +151,15 @@ func classifyToolError(ctx context.Context, execErr error) string {
 // returned slice preserves input order (NOT completion order), so
 // callers can correlate results with the calls they supplied.
 //
+// Retry (per-call Idempotent + MaxAttempts>1) applies inside each
+// worker. Only the attempt-1 Scheduled events are contiguous in the
+// log; retry Scheduleds land interleaved with sibling Completeds by
+// design, because a retry is contingent on the prior attempt's Failed.
+//
 // Under ModeReplay, CallTools does NOT fan out — it executes tools
-// sequentially in the order their Completed/Failed events appear in
-// the recording so the re-emitted payloads land at the same seq as
-// the original run. Byte-for-byte divergence surfaces as
+// sequentially in the order their final Completed/Failed events
+// appear in the recording so the re-emitted payloads land at the same
+// seq as the original run. Byte-for-byte divergence surfaces as
 // ErrReplayMismatch from the underlying emit.
 //
 // Panics if ctx has no step.Context attached.
@@ -192,9 +180,9 @@ func CallTools(ctx context.Context, calls []ToolCall) ([]ToolResult, error) {
 	}
 
 	// 2. Emit ToolCallScheduled for every call, in input order. emit()'s
-	// mutex serializes the seq increment; this also means Scheduled
-	// events are contiguous in the log — workers can't interleave their
-	// Completed/Failed with a peer's Scheduled.
+	// mutex serializes the seq increment; this also means attempt-1
+	// Scheduled events are contiguous in the log — workers can't
+	// interleave their Completed/Failed with a peer's first Scheduled.
 	for i := range calls {
 		argsRaw := calls[i].Args
 		if len(argsRaw) == 0 {
@@ -261,56 +249,153 @@ func CallTools(ctx context.Context, calls []ToolCall) ([]ToolResult, error) {
 	return results, nil
 }
 
-// executeOne runs a single tool assuming its ToolCallScheduled has
-// already been emitted, and emits the matching Completed/Failed
-// outcome. Shared between CallTools workers and the replay-order
-// sequential dispatch. Safe for concurrent use (emit() serializes via
-// Context.mu; runToolSafely has no shared mutable state).
+// executeOne runs a single tool assuming its attempt-1 ToolCallScheduled
+// has already been emitted, and emits the matching Completed/Failed
+// outcome. For retries it emits fresh Scheduled{Attempt: n} events
+// before each retry. Shared between CallTools workers, the replay-order
+// sequential dispatch, and CallTool. Safe for concurrent use (emit()
+// serializes via Context.mu; runToolSafely has no shared mutable state).
 func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage, error) {
-	reg := c.registry()
-	if reg == nil {
-		return nil, emitToolFailed(ctx, c, call.CallID, ErrToolNotFound, "tool", 0)
+	attempts := 1
+	if call.Idempotent && call.MaxAttempts > 1 {
+		attempts = call.MaxAttempts
 	}
-	tl, ok := reg.Get(call.Name)
-	if !ok {
-		wrapped := fmt.Errorf("%w: %s", ErrToolNotFound, call.Name)
-		return nil, emitToolFailed(ctx, c, call.CallID, wrapped, "tool", 0)
+	backoffFn := call.Backoff
+	if backoffFn == nil {
+		backoffFn = defaultBackoff
 	}
 
-	start := time.Now()
-	result, execErr := runToolSafely(ctx, tl, call.Args)
-	durMs := ReplayDurationMs(ctx, time.Since(start).Milliseconds())
+	for attempt := 1; attempt <= attempts; attempt++ {
+		// Attempt-1 Scheduled is emitted by the caller (CallTool /
+		// CallTools). For retries we emit a fresh Scheduled before the
+		// call so the log carries one Scheduled per attempt.
+		if attempt > 1 {
+			argsRaw := call.Args
+			if len(argsRaw) == 0 {
+				argsRaw = json.RawMessage("{}")
+			}
+			argsCBOR, err := jsonToCanonicalCBOR(argsRaw)
+			if err != nil {
+				return nil, fmt.Errorf("step.CallTool(%q): encode args: %w", call.Name, err)
+			}
+			if err := emit(ctx, c, event.KindToolCallScheduled, event.ToolCallScheduled{
+				CallID:   call.CallID,
+				TurnID:   call.TurnID,
+				ToolName: call.Name,
+				Args:     argsCBOR,
+				Attempt:  uint32(attempt),
+			}); err != nil {
+				return nil, fmt.Errorf("step.CallTool(%q): emit Scheduled: %w", call.Name, err)
+			}
+		}
 
-	if execErr == nil {
-		resultRaw := result
-		if len(resultRaw) == 0 {
-			resultRaw = json.RawMessage("null")
+		reg := c.registry()
+		if reg == nil {
+			return nil, emitToolFailed(ctx, c, call.CallID, ErrToolNotFound, "tool", 0, uint32(attempt))
 		}
-		resultCBOR, cerr := jsonToCanonicalCBOR(resultRaw)
-		if cerr != nil {
-			return result, fmt.Errorf("step.CallTools(%q): encode result: %w", call.Name, cerr)
+		tl, ok := reg.Get(call.Name)
+		if !ok {
+			wrapped := fmt.Errorf("%w: %s", ErrToolNotFound, call.Name)
+			return nil, emitToolFailed(ctx, c, call.CallID, wrapped, "tool", 0, uint32(attempt))
 		}
-		if err := emit(ctx, c, event.KindToolCallCompleted, event.ToolCallCompleted{
+
+		start := time.Now()
+		result, execErr := runToolSafely(ctx, tl, call.Args)
+		durMs := ReplayDurationMs(ctx, time.Since(start).Milliseconds())
+
+		if execErr == nil {
+			resultRaw := result
+			if len(resultRaw) == 0 {
+				resultRaw = json.RawMessage("null")
+			}
+			resultCBOR, cerr := jsonToCanonicalCBOR(resultRaw)
+			if cerr != nil {
+				return result, fmt.Errorf("step.CallTool(%q): encode result: %w", call.Name, cerr)
+			}
+			if err := emit(ctx, c, event.KindToolCallCompleted, event.ToolCallCompleted{
+				CallID:     call.CallID,
+				Result:     resultCBOR,
+				DurationMs: durMs,
+				Attempt:    uint32(attempt),
+			}); err != nil {
+				return result, fmt.Errorf("step.CallTool(%q): emit Completed: %w", call.Name, err)
+			}
+			return result, nil
+		}
+
+		errType := classifyToolError(ctx, execErr)
+
+		// Terminal iff we can't retry. ctx errors (incl. cancellation
+		// and deadline) are never retried; ErrToolNotFound never is;
+		// non-transient errors never are; and the final attempt is
+		// always terminal.
+		retryable := errors.Is(execErr, tool.ErrTransient) &&
+			!errors.Is(execErr, ErrToolNotFound) &&
+			ctx.Err() == nil
+		if !retryable || attempt == attempts {
+			return nil, emitToolFailed(ctx, c, call.CallID, execErr, errType, durMs, uint32(attempt))
+		}
+
+		// Not terminal: emit Failed for this attempt, sleep backoff,
+		// loop. In replay mode the sleep is skipped — the recorded
+		// event stream dictates ordering.
+		if emitErr := emit(ctx, c, event.KindToolCallFailed, event.ToolCallFailed{
 			CallID:     call.CallID,
-			Result:     resultCBOR,
+			Error:      execErr.Error(),
+			ErrorType:  errType,
 			DurationMs: durMs,
-			Attempt:    1,
-		}); err != nil {
-			return result, fmt.Errorf("step.CallTools(%q): emit Completed: %w", call.Name, err)
+			Attempt:    uint32(attempt),
+		}); emitErr != nil {
+			return nil, errors.Join(fmt.Errorf("step.CallTool: emit Failed: %w", emitErr), execErr)
 		}
-		return result, nil
+		if c.mode != ModeReplay {
+			select {
+			case <-time.After(backoffFn(attempt)):
+			case <-ctx.Done():
+				// ctx cancelled mid-backoff. The last Failed already
+				// captured the transient error; surface ctx.Err so the
+				// caller treats this the same as any other cancellation.
+				return nil, ctx.Err()
+			}
+		}
 	}
+	// Unreachable: the loop always returns via success, terminal
+	// failure, or ctx cancellation.
+	return nil, fmt.Errorf("step.CallTool(%q): retry loop exhausted without result", call.Name)
+}
 
-	errType := classifyToolError(ctx, execErr)
-	return nil, emitToolFailed(ctx, c, call.CallID, execErr, errType, durMs)
+// defaultBackoff is used when ToolCall.Backoff is nil: exponential
+// 100ms, 200ms, 400ms, ... capped at 10s, with 0–25% additive jitter.
+// The jitter is non-deterministic but only runs in live mode; replay
+// skips the sleep entirely so replay stays byte-stable.
+func defaultBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	base := 100 * time.Millisecond
+	// Shift safely up to attempt-1 = 6 (6.4s); larger attempts clamp.
+	shift := attempt - 1
+	if shift > 6 {
+		shift = 6
+	}
+	d := base << shift
+	if d > 10*time.Second {
+		d = 10 * time.Second
+	}
+	jitter := time.Duration(rand.Int63n(int64(d / 4)))
+	return d + jitter
 }
 
 // replayCompletionOrder returns the indices into calls in the order
-// their Completed/Failed events appear in the recorded log, starting
-// from the current chain cursor. Returns an ErrReplayMismatch-wrapped
-// error when the recording doesn't contain an outcome for every
-// CallID in calls (i.e. the caller diverged by adding tool calls the
-// live run didn't make).
+// their FINAL Completed/Failed events appear in the recorded log,
+// starting from the current chain cursor. With retry, a CallID can
+// have multiple Failed events followed by a Completed or a final
+// Failed — we pick the last outcome per CallID so replay's emit order
+// matches the live run's completion order.
+//
+// Returns an ErrReplayMismatch-wrapped error when the recording
+// doesn't contain an outcome for every CallID in calls (i.e. the
+// caller diverged by adding tool calls the live run didn't make).
 func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 	idxByCallID := make(map[string]int, len(calls))
 	for i := range calls {
@@ -322,9 +407,8 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 	recorded := c.recorded
 	c.mu.Unlock()
 
-	order := make([]int, 0, len(calls))
-	seen := make(map[string]struct{}, len(calls))
-	for i := start; i < len(recorded) && len(order) < len(calls); i++ {
+	lastIdx := make(map[string]int, len(calls))
+	for i := start; i < len(recorded); i++ {
 		ev := recorded[i]
 		var callID string
 		switch ev.Kind {
@@ -343,18 +427,32 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 		default:
 			continue
 		}
-		idx, ok := idxByCallID[callID]
-		if !ok {
+		if _, ok := idxByCallID[callID]; !ok {
 			return nil, fmt.Errorf("%w: recorded completion for CallID %q not in current batch", ErrReplayMismatch, callID)
 		}
-		if _, dup := seen[callID]; dup {
-			continue
-		}
-		seen[callID] = struct{}{}
-		order = append(order, idx)
+		lastIdx[callID] = i
 	}
-	if len(order) != len(calls) {
-		return nil, fmt.Errorf("%w: expected %d tool outcomes in recording, found %d", ErrReplayMismatch, len(calls), len(order))
+	if len(lastIdx) != len(calls) {
+		return nil, fmt.Errorf("%w: expected %d tool outcomes in recording, found %d", ErrReplayMismatch, len(calls), len(lastIdx))
+	}
+
+	// Build ordering: sort CallIDs by their final-outcome index.
+	type pair struct {
+		idx, last int
+	}
+	pairs := make([]pair, 0, len(calls))
+	for cid, li := range lastIdx {
+		pairs = append(pairs, pair{idx: idxByCallID[cid], last: li})
+	}
+	// Insertion sort — len is bounded by tool-call fanout (typically <16).
+	for i := 1; i < len(pairs); i++ {
+		for j := i; j > 0 && pairs[j-1].last > pairs[j].last; j-- {
+			pairs[j-1], pairs[j] = pairs[j], pairs[j-1]
+		}
+	}
+	order := make([]int, len(pairs))
+	for i, p := range pairs {
+		order[i] = p.idx
 	}
 	return order, nil
 }
@@ -362,13 +460,13 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 // emitToolFailed emits the Failed event and returns the underlying
 // error (so CallTool's caller gets the wrapped error, not a
 // log-emission error unless the emit itself failed).
-func emitToolFailed(ctx context.Context, c *Context, callID string, execErr error, errType string, durMs int64) error {
+func emitToolFailed(ctx context.Context, c *Context, callID string, execErr error, errType string, durMs int64, attempt uint32) error {
 	if emitErr := emit(ctx, c, event.KindToolCallFailed, event.ToolCallFailed{
 		CallID:     callID,
 		Error:      execErr.Error(),
 		ErrorType:  errType,
 		DurationMs: durMs,
-		Attempt:    1,
+		Attempt:    attempt,
 	}); emitErr != nil {
 		// errors.Join preserves both chains so errors.Is(err, ErrToolNotFound)
 		// (or any other sentinel inside execErr) still routes even when the

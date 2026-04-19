@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -380,6 +382,250 @@ func TestCallTools_EmptyBatchNoop(t *testing.T) {
 	}
 	if evs := readAllTools(t, log); len(evs) != 0 {
 		t.Fatalf("empty batch emitted %d events", len(evs))
+	}
+}
+
+// flakyTool returns a Tool that returns a transient error the first
+// failN calls, then succeeds. Safe for concurrent use — attempts are
+// driven through an atomic counter.
+type flakyTool struct {
+	name  string
+	failN int32
+	count int32
+}
+
+func (f *flakyTool) Name() string              { return f.name }
+func (f *flakyTool) Description() string       { return "flaky" }
+func (f *flakyTool) Schema() json.RawMessage   { return json.RawMessage(`{"type":"object"}`) }
+func (f *flakyTool) Execute(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {
+	n := atomic.AddInt32(&f.count, 1)
+	if n <= f.failN {
+		return nil, fmt.Errorf("attempt %d flake: %w", n, tool.ErrTransient)
+	}
+	return json.RawMessage(fmt.Sprintf(`{"attempt":%d}`, n)), nil
+}
+
+// noBackoff returns 0 so retry tests don't sleep.
+func noBackoff(int) time.Duration { return 0 }
+
+// tinyBackoff returns a small sleep used by the ctx-cancel test.
+func tinyBackoff(int) time.Duration { return 50 * time.Millisecond }
+
+func TestCallTool_RetrySucceedsOnThirdAttempt(t *testing.T) {
+	ft := &flakyTool{name: "flaky", failN: 2}
+	reg := step.NewRegistry(ft)
+	ctx, log := newToolsCtx(t, reg)
+
+	out, err := step.CallTool(ctx, step.ToolCall{
+		CallID: "c1", TurnID: "t1", Name: "flaky",
+		Idempotent: true, MaxAttempts: 3, Backoff: noBackoff,
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if got := string(out); got != `{"attempt":3}` {
+		t.Fatalf("out = %s", got)
+	}
+
+	evs := readAllTools(t, log)
+	wantKinds := []event.Kind{
+		event.KindToolCallScheduled, event.KindToolCallFailed,
+		event.KindToolCallScheduled, event.KindToolCallFailed,
+		event.KindToolCallScheduled, event.KindToolCallCompleted,
+	}
+	if len(evs) != len(wantKinds) {
+		t.Fatalf("len(events) = %d, want %d", len(evs), len(wantKinds))
+	}
+	for i, k := range wantKinds {
+		if evs[i].Kind != k {
+			t.Fatalf("events[%d].Kind = %s, want %s", i, evs[i].Kind, k)
+		}
+	}
+	// Attempt numbers increment 1,1,2,2,3,3.
+	wantAttempt := []uint32{1, 1, 2, 2, 3, 3}
+	for i, ev := range evs {
+		var got uint32
+		switch ev.Kind {
+		case event.KindToolCallScheduled:
+			s, _ := ev.AsToolCallScheduled()
+			got = s.Attempt
+		case event.KindToolCallCompleted:
+			c, _ := ev.AsToolCallCompleted()
+			got = c.Attempt
+		case event.KindToolCallFailed:
+			f, _ := ev.AsToolCallFailed()
+			got = f.Attempt
+		}
+		if got != wantAttempt[i] {
+			t.Fatalf("events[%d].Attempt = %d, want %d", i, got, wantAttempt[i])
+		}
+	}
+}
+
+func TestCallTool_NonIdempotentIgnoresMaxAttempts(t *testing.T) {
+	ft := &flakyTool{name: "flaky", failN: 5}
+	reg := step.NewRegistry(ft)
+	ctx, log := newToolsCtx(t, reg)
+
+	_, err := step.CallTool(ctx, step.ToolCall{
+		CallID: "c1", TurnID: "t1", Name: "flaky",
+		Idempotent: false, MaxAttempts: 3, Backoff: noBackoff,
+	})
+	if !errors.Is(err, tool.ErrTransient) {
+		t.Fatalf("err = %v, want wraps ErrTransient", err)
+	}
+	if got := atomic.LoadInt32(&ft.count); got != 1 {
+		t.Fatalf("executions = %d, want 1 (non-idempotent must not retry)", got)
+	}
+	evs := readAllTools(t, log)
+	if len(evs) != 2 {
+		t.Fatalf("len(events) = %d, want 2", len(evs))
+	}
+	if evs[1].Kind != event.KindToolCallFailed {
+		t.Fatalf("events[1].Kind = %s", evs[1].Kind)
+	}
+}
+
+func TestCallTool_NonTransientDoesNotRetry(t *testing.T) {
+	// errTool returns a plain error (no ErrTransient wrap) — retry must
+	// bail on the first attempt even with Idempotent + MaxAttempts set.
+	reg := step.NewRegistry(errTool(errors.New("bad input")))
+	ctx, log := newToolsCtx(t, reg)
+
+	_, err := step.CallTool(ctx, step.ToolCall{
+		CallID: "c1", TurnID: "t1", Name: "boom",
+		Idempotent: true, MaxAttempts: 5, Backoff: noBackoff,
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	evs := readAllTools(t, log)
+	if len(evs) != 2 {
+		t.Fatalf("len(events) = %d, want 2 (one Scheduled, one Failed)", len(evs))
+	}
+}
+
+func TestCallTool_CtxCancelAbortsRetry(t *testing.T) {
+	ft := &flakyTool{name: "flaky", failN: 100} // always transient
+	reg := step.NewRegistry(ft)
+	ctx, log := newToolsCtx(t, reg)
+
+	cctx, cancel := context.WithCancel(ctx)
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := step.CallTool(cctx, step.ToolCall{
+		CallID: "c1", TurnID: "t1", Name: "flaky",
+		Idempotent: true, MaxAttempts: 5, Backoff: tinyBackoff,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	// Tool should have run at least once; far fewer than 5 times since
+	// cancellation interrupts a backoff.
+	if got := atomic.LoadInt32(&ft.count); got >= 5 {
+		t.Fatalf("executions = %d, cancellation did not interrupt retry loop", got)
+	}
+	// The log must contain at least one Scheduled+Failed pair.
+	evs := readAllTools(t, log)
+	if len(evs) < 2 || evs[0].Kind != event.KindToolCallScheduled {
+		t.Fatalf("events = %+v", evs)
+	}
+}
+
+func TestCallTool_RetryReplayMatches(t *testing.T) {
+	// Record a retry-success run.
+	liveTool := &flakyTool{name: "flaky", failN: 2}
+	liveReg := step.NewRegistry(liveTool)
+	liveLog := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = liveLog.Close() })
+	liveCtx := step.WithContext(context.Background(), step.NewContext(step.Config{
+		Log: liveLog, RunID: "rec-retry", Tools: liveReg,
+	}))
+	if _, err := step.CallTool(liveCtx, step.ToolCall{
+		CallID: "c1", TurnID: "t1", Name: "flaky",
+		Idempotent: true, MaxAttempts: 3, Backoff: noBackoff,
+	}); err != nil {
+		t.Fatalf("live CallTool: %v", err)
+	}
+	liveEvs, err := liveLog.Read(context.Background(), "rec-retry")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+
+	// Replay: fresh counter (starts at 0) reproduces the same
+	// transient-transient-success pattern.
+	replayTool := &flakyTool{name: "flaky", failN: 2}
+	replayReg := step.NewRegistry(replayTool)
+	replayLog := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = replayLog.Close() })
+	replayCtxValue := step.NewContext(step.Config{
+		Log: replayLog, RunID: "replay-retry", Tools: replayReg,
+		Mode:     step.ModeReplay,
+		Recorded: liveEvs,
+	})
+	rCtx := step.WithContext(context.Background(), replayCtxValue)
+	if _, err := step.CallTool(rCtx, step.ToolCall{
+		CallID: "c1", TurnID: "t1", Name: "flaky",
+		Idempotent: true, MaxAttempts: 3, Backoff: noBackoff,
+	}); err != nil {
+		t.Fatalf("replay CallTool: %v", err)
+	}
+}
+
+func TestCallTools_ParallelRetryOrdering(t *testing.T) {
+	// One flaky tool (retries) and one clean echo tool running in
+	// parallel. replayCompletionOrder must order by each CallID's
+	// FINAL outcome, not first attempt.
+	flaky := &flakyTool{name: "flaky", failN: 1}
+	reg := step.NewRegistry(flaky, echoTool())
+	ctx, log := newToolsCtx(t, reg)
+
+	results, err := step.CallTools(ctx, []step.ToolCall{
+		{CallID: "cf", TurnID: "t1", Name: "flaky",
+			Idempotent: true, MaxAttempts: 3, Backoff: noBackoff},
+		{CallID: "ce", TurnID: "t1", Name: "echo",
+			Args: json.RawMessage(`{"msg":"hi"}`)},
+	})
+	if err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+	for i, r := range results {
+		if r.Err != nil {
+			t.Fatalf("results[%d].Err = %v", i, r.Err)
+		}
+	}
+
+	// The flaky tool's first Failed lands early; its final Completed
+	// lands later. The echo's Completed lands somewhere between them.
+	// We assert only that each CallID has at least one Scheduled and a
+	// final Completed event.
+	evs := readAllTools(t, log)
+	var flakyScheduled, flakyCompleted, echoCompleted int
+	for _, ev := range evs {
+		switch ev.Kind {
+		case event.KindToolCallScheduled:
+			s, _ := ev.AsToolCallScheduled()
+			if s.CallID == "cf" {
+				flakyScheduled++
+			}
+		case event.KindToolCallCompleted:
+			c, _ := ev.AsToolCallCompleted()
+			if c.CallID == "cf" {
+				flakyCompleted++
+			}
+			if c.CallID == "ce" {
+				echoCompleted++
+			}
+		}
+	}
+	if flakyScheduled != 2 {
+		t.Fatalf("flaky Scheduled count = %d, want 2", flakyScheduled)
+	}
+	if flakyCompleted != 1 || echoCompleted != 1 {
+		t.Fatalf("Completed: flaky=%d echo=%d, want 1 and 1", flakyCompleted, echoCompleted)
 	}
 }
 
