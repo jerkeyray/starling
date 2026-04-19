@@ -5,6 +5,7 @@ import (
 	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -85,7 +86,17 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 		return nil, terr
 	}
 
-	result := a.buildResult(runID, startWall, term)
+	result, readErr := a.buildResult(runID, startWall, term)
+	// readErr is only populated if the log backend failed to re-read
+	// events after a successful terminal emit — rare, but indicates a
+	// log-backend problem the caller should know about. Combine it with
+	// runErr so neither is silently lost.
+	if readErr != nil {
+		if runErr != nil {
+			return result, errors.Join(runErr, readErr)
+		}
+		return result, readErr
+	}
 	return result, runErr
 }
 
@@ -166,6 +177,10 @@ func (a *Agent) emitRunStarted(ctx context.Context, sc *step.Context, goal strin
 	paramsHash := hashBytes(a.Config.Params)
 	sysPromptHash := hashBytes([]byte(a.Config.SystemPrompt))
 
+	// Sort by Name so reordering the same set of tools produces the same
+	// ToolRegistryHash. step.Registry.Names() is documented to return
+	// alphabetical order for exactly this reason; the event emission path
+	// must match.
 	schemas := make([]event.ToolSchemaRef, 0, len(a.Tools))
 	for _, t := range a.Tools {
 		schemas = append(schemas, event.ToolSchemaRef{
@@ -173,6 +188,7 @@ func (a *Agent) emitRunStarted(ctx context.Context, sc *step.Context, goal strin
 			SchemaHash: hashBytes(t.Schema()),
 		})
 	}
+	sort.Slice(schemas, func(i, j int) bool { return schemas[i].Name < schemas[j].Name })
 	registryHash := toolRegistryHash(schemas)
 
 	info := a.Provider.Info()
@@ -252,8 +268,12 @@ func (a *Agent) emitTerminal(ctx context.Context, sc *step.Context, runErr error
 // buildResult materializes the user-facing RunResult from the log.
 // It re-reads the log (cheap for in-mem; SQLite caches) so the values
 // match what a later reader would compute.
-func (a *Agent) buildResult(runID string, startWall time.Time, term event.Kind) *RunResult {
-	evs, _ := a.Log.Read(context.Background(), runID)
+//
+// The returned error is populated only when the log re-read fails
+// (terminal event is already written at this point, so the run
+// itself is final); callers should errors.Join it with any run error.
+func (a *Agent) buildResult(runID string, startWall time.Time, term event.Kind) (*RunResult, error) {
+	evs, readErr := a.Log.Read(context.Background(), runID)
 	stats := aggregateStats(evs)
 
 	var root []byte
@@ -285,7 +305,7 @@ func (a *Agent) buildResult(runID string, startWall time.Time, term event.Kind) 
 		Duration:      time.Since(startWall),
 		TerminalKind:  term,
 		MerkleRoot:    root,
-	}
+	}, readErr
 }
 
 // validate checks the Agent's required fields before Run starts. Kept
@@ -427,8 +447,8 @@ func classifyRunError(err error) string {
 // empty TurnID; the link is reconstructable from seq ordering (the
 // TurnStarted event immediately before each ToolCallScheduled).
 //
-// TODO(T8 follow-up): surface the minted TurnID on provider.Response
-// so this becomes `return resp.TurnID`. Tracked as a M2 cleanup.
+// TODO: surface the minted TurnID on provider.Response so this becomes
+// `return resp.TurnID`.
 func currentTurnID(_ context.Context) string { return "" }
 
 // ----------------------------------------------------------------------

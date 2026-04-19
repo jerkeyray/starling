@@ -314,6 +314,50 @@ func TestAgent_Cancelled(t *testing.T) {
 	}
 }
 
+// TestAgent_ToolRegistryHashStableUnderReorder pins the fix for a
+// spec-drift bug: emitRunStarted must hash tools in alphabetical order
+// so the same set of tools in different declaration order produces the
+// same ToolRegistryHash. step.Registry.Names() is alphabetical by
+// contract; the event emission path must match.
+func TestAgent_ToolRegistryHashStableUnderReorder(t *testing.T) {
+	mkScript := func() [][]provider.StreamChunk {
+		return [][]provider.StreamChunk{{
+			{Kind: provider.ChunkText, Text: "ok"},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+			{Kind: provider.ChunkEnd, StopReason: "stop"},
+		}}
+	}
+	zebra := tool.Typed("zebra", "", func(_ context.Context, _ struct{}) (struct{}, error) { return struct{}{}, nil })
+	alpha := tool.Typed("alpha", "", func(_ context.Context, _ struct{}) (struct{}, error) { return struct{}{}, nil })
+
+	runOnce := func(tools []tool.Tool) []byte {
+		log := eventlog.NewInMemory()
+		defer log.Close()
+		a := &starling.Agent{
+			Provider: &cannedProvider{scripts: mkScript()},
+			Tools:    tools,
+			Log:      log,
+			Config:   starling.Config{Model: "m"},
+		}
+		res, err := a.Run(context.Background(), "go")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		evs, _ := log.Read(context.Background(), res.RunID)
+		rs, err := evs[0].AsRunStarted()
+		if err != nil {
+			t.Fatalf("AsRunStarted: %v", err)
+		}
+		return rs.ToolRegistryHash
+	}
+
+	h1 := runOnce([]tool.Tool{alpha, zebra})
+	h2 := runOnce([]tool.Tool{zebra, alpha})
+	if string(h1) != string(h2) {
+		t.Fatalf("ToolRegistryHash differs under reorder:\n  [alpha,zebra]=%x\n  [zebra,alpha]=%x", h1, h2)
+	}
+}
+
 // ---- tiny helpers --------------------------------------------------------
 
 func kindsEq(a, b []event.Kind) bool {

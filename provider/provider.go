@@ -140,6 +140,13 @@ type StreamChunk struct {
 	Usage *UsageUpdate
 
 	// StopReason, RawResponseHash, and ProviderReqID are set on ChunkEnd.
+	//
+	// RawResponseHash is the provider-contract chain-of-custody field:
+	// adapters must populate it with a BLAKE3-256 digest (32 bytes) over
+	// the unmodified SDK-level response bytes so a later reader can prove
+	// the event log faithfully represents what the provider returned.
+	// step.LLMCall accepts an empty value to stay tolerant of
+	// third-party adapters, but the in-tree adapters must set it.
 	StopReason      string
 	RawResponseHash []byte
 	ProviderReqID   string

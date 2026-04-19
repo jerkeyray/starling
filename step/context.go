@@ -82,9 +82,13 @@ func emit[T any](ctx context.Context, c *Context, kind event.Kind, payload T) er
 	defer c.mu.Unlock()
 
 	ev := event.Event{
-		RunID:     c.runID,
-		Seq:       c.nextSeq,
-		PrevHash:  c.prevHash,
+		RunID:    c.runID,
+		Seq:      c.nextSeq,
+		PrevHash: c.prevHash,
+		// TODO: route this through step.Now so replay can reproduce the
+		// exact timestamp sequence. EVENTS.md §1 specifies "from
+		// step.Now (not wall clock)"; this is wall-clock as a placeholder
+		// until the deterministic helper lands.
 		Timestamp: time.Now().UnixNano(),
 		Kind:      kind,
 		Payload:   encoded,

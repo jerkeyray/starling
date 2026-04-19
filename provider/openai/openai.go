@@ -196,7 +196,11 @@ func convertMessage(m provider.Message) (oai.ChatCompletionMessageParamUnion, er
 		}
 		content := m.ToolResult.Content
 		// OpenAI tool messages have no first-class error marker; prefix
-		// error results so the model sees a signal. Refined in M2.
+		// error results so the model sees a signal. The prefix is lossy
+		// (a tool that legitimately returns text starting with "error: "
+		// is indistinguishable from a failure on round-trip); acceptable
+		// for M1 because tool failures rarely cycle back through the
+		// provider. Refined in M2 via a structured error channel.
 		if m.ToolResult.IsError {
 			content = "error: " + content
 		}

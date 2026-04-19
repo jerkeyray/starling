@@ -151,7 +151,10 @@ func emitToolFailed(ctx context.Context, c *Context, callID string, execErr erro
 		DurationMs: durMs,
 		Attempt:    1,
 	}); emitErr != nil {
-		return fmt.Errorf("step.CallTool: emit Failed: %w (original: %v)", emitErr, execErr)
+		// errors.Join preserves both chains so errors.Is(err, ErrToolNotFound)
+		// (or any other sentinel inside execErr) still routes even when the
+		// log emit itself failed.
+		return errors.Join(fmt.Errorf("step.CallTool: emit Failed: %w", emitErr), execErr)
 	}
 	return execErr
 }

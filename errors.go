@@ -42,10 +42,14 @@ type ToolError struct {
 	Err    error
 }
 
+// Error implements the error interface, formatting the tool name,
+// CallID, and underlying error.
 func (e *ToolError) Error() string {
 	return fmt.Sprintf("starling: tool %q (call %s): %v", e.Name, e.CallID, e.Err)
 }
 
+// Unwrap returns the underlying tool error so callers can route on it
+// with errors.Is / errors.As.
 func (e *ToolError) Unwrap() error { return e.Err }
 
 // ProviderError wraps an error from the LLM provider (stream open
@@ -58,6 +62,8 @@ type ProviderError struct {
 	Err      error
 }
 
+// Error implements the error interface, including the provider ID and
+// HTTP status code (when non-zero).
 func (e *ProviderError) Error() string {
 	if e.Code != 0 {
 		return fmt.Sprintf("starling: provider %q (status %d): %v", e.Provider, e.Code, e.Err)
@@ -65,4 +71,6 @@ func (e *ProviderError) Error() string {
 	return fmt.Sprintf("starling: provider %q: %v", e.Provider, e.Err)
 }
 
+// Unwrap returns the underlying provider error so callers can route on
+// it with errors.Is / errors.As.
 func (e *ProviderError) Unwrap() error { return e.Err }
