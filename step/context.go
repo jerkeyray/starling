@@ -8,6 +8,7 @@ import (
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
+	"github.com/jerkeyray/starling/provider"
 )
 
 // Context is the opaque per-run state attached to every stdlib
@@ -20,8 +21,11 @@ import (
 // agent loop (the root starling package); advanced users wiring their
 // own loops may call NewContext directly.
 type Context struct {
-	log   eventlog.EventLog
-	runID string
+	log      eventlog.EventLog
+	runID    string
+	provider provider.Provider
+	tools    *Registry
+	budget   BudgetConfig
 
 	mu       sync.Mutex
 	nextSeq  uint64
@@ -29,13 +33,23 @@ type Context struct {
 }
 
 // NewContext returns a Context primed to emit the first event of a run
-// (seq=1, prevHash=nil). The agent loop creates one of these per run
-// and attaches it via WithContext before invoking any step functions.
-func NewContext(log eventlog.EventLog, runID string) *Context {
+// (seq=1, prevHash=nil). cfg.Log and cfg.RunID are required; Provider
+// and Tools are optional at construction and only checked lazily by
+// LLMCall and CallTool respectively.
+func NewContext(cfg Config) *Context {
+	if cfg.Log == nil {
+		panic("step.NewContext: cfg.Log is nil")
+	}
+	if cfg.RunID == "" {
+		panic("step.NewContext: cfg.RunID is empty")
+	}
 	return &Context{
-		log:     log,
-		runID:   runID,
-		nextSeq: 1,
+		log:      cfg.Log,
+		runID:    cfg.RunID,
+		provider: cfg.Provider,
+		tools:    cfg.Tools,
+		budget:   cfg.Budget,
+		nextSeq:  1,
 	}
 }
 
@@ -43,6 +57,15 @@ func NewContext(log eventlog.EventLog, runID string) *Context {
 // for tools / tests that need to correlate external state with the
 // current run.
 func (c *Context) RunID() string { return c.runID }
+
+// prov returns the provider configured on this Context, or nil if none.
+func (c *Context) prov() provider.Provider { return c.provider }
+
+// registry returns the tool registry, or nil if none.
+func (c *Context) registry() *Registry { return c.tools }
+
+// budgetCfg returns the pre-call budget configuration.
+func (c *Context) budgetCfg() BudgetConfig { return c.budget }
 
 // emit builds the full Event envelope for payload, advances the chain
 // cursor, and appends to the log. Safe for concurrent use.
@@ -70,7 +93,12 @@ func emit[T any](ctx context.Context, c *Context, kind event.Kind, payload T) er
 	if err != nil {
 		return fmt.Errorf("step: marshal event: %w", err)
 	}
-	if err := c.log.Append(ctx, c.runID, ev); err != nil {
+	// Use an uncancellable ctx for the log write: once we've decided to
+	// emit, a downstream ctx cancellation must not drop the audit trail.
+	// In particular, tool-failure events for cancelled tools would
+	// otherwise be silently dropped, leaving the chain terminated at
+	// the Scheduled event with no matching outcome.
+	if err := c.log.Append(context.WithoutCancel(ctx), c.runID, ev); err != nil {
 		return err
 	}
 	c.nextSeq++
