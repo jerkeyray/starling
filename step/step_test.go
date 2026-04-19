@@ -17,7 +17,7 @@ func fixture(t *testing.T) (context.Context, *step.Context, eventlog.EventLog) {
 	t.Helper()
 	log := eventlog.NewInMemory()
 	t.Cleanup(func() { _ = log.Close() })
-	c := step.NewContext(step.Config{Log: log, RunID: "run-test-1"})
+	c := step.MustNewContext(step.Config{Log: log, RunID: "run-test-1"})
 	ctx := step.WithContext(context.Background(), c)
 	return ctx, c, log
 }
@@ -31,7 +31,7 @@ func TestFrom_MissingReturnsFalse(t *testing.T) {
 func TestWithContext_RoundTrip(t *testing.T) {
 	log := eventlog.NewInMemory()
 	defer log.Close()
-	want := step.NewContext(step.Config{Log: log, RunID: "run-1"})
+	want := step.MustNewContext(step.Config{Log: log, RunID: "run-1"})
 	ctx := step.WithContext(context.Background(), want)
 	got, ok := step.From(ctx)
 	if !ok || got != want {

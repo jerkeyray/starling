@@ -71,7 +71,7 @@ func newToolsCtx(t *testing.T, reg *step.Registry) (context.Context, eventlog.Ev
 	t.Helper()
 	log := eventlog.NewInMemory()
 	t.Cleanup(func() { _ = log.Close() })
-	c := step.NewContext(step.Config{
+	c := step.MustNewContext(step.Config{
 		Log:   log,
 		RunID: "run-tool-1",
 		Tools: reg,
@@ -314,7 +314,7 @@ func TestCallTools_SemaphoreCapOne(t *testing.T) {
 	reg := step.NewRegistry(slowTool("s1", each), slowTool("s2", each))
 	log := eventlog.NewInMemory()
 	t.Cleanup(func() { _ = log.Close() })
-	c := step.NewContext(step.Config{
+	c := step.MustNewContext(step.Config{
 		Log:              log,
 		RunID:            "run-tool-1",
 		Tools:            reg,
@@ -541,7 +541,7 @@ func TestCallTool_RetryReplayMatches(t *testing.T) {
 	liveReg := step.NewRegistry(liveTool)
 	liveLog := eventlog.NewInMemory()
 	t.Cleanup(func() { _ = liveLog.Close() })
-	liveCtx := step.WithContext(context.Background(), step.NewContext(step.Config{
+	liveCtx := step.WithContext(context.Background(), step.MustNewContext(step.Config{
 		Log: liveLog, RunID: "rec-retry", Tools: liveReg,
 	}))
 	if _, err := step.CallTool(liveCtx, step.ToolCall{
@@ -561,7 +561,7 @@ func TestCallTool_RetryReplayMatches(t *testing.T) {
 	replayReg := step.NewRegistry(replayTool)
 	replayLog := eventlog.NewInMemory()
 	t.Cleanup(func() { _ = replayLog.Close() })
-	replayCtxValue := step.NewContext(step.Config{
+	replayCtxValue := step.MustNewContext(step.Config{
 		Log: replayLog, RunID: "replay-retry", Tools: replayReg,
 		Mode:     step.ModeReplay,
 		Recorded: liveEvs,

@@ -65,7 +65,8 @@ type ToolCall struct {
 //   - tool not in registry                    → "tool"   (err is ErrToolNotFound)
 //   - any other error returned by the tool    → "tool"
 //
-// M3's watchdog will add "timeout".
+// A per-tool watchdog ("timeout" classification) is tracked as future
+// work.
 //
 // When ToolCall opts into retry (Idempotent + MaxAttempts>1), every
 // attempt emits its own Scheduled + Completed/Failed pair carrying

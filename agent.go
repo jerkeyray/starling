@@ -36,7 +36,10 @@ type Agent struct {
 	Log eventlog.EventLog
 
 	// Budget is the budget enforcement struct. Optional; zero values
-	// disable that axis. M1 honours MaxInputTokens only.
+	// disable that axis. All four axes (MaxInputTokens, MaxOutputTokens,
+	// MaxUSD, MaxWallClock) are enforced: input tokens pre-call,
+	// output tokens and USD mid-stream on every usage chunk, wall clock
+	// via context.WithDeadline on the run.
 	Budget *Budget
 
 	// Config carries model / system prompt / params / MaxTurns.
@@ -92,7 +95,10 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 		stepCfg.Mode = step.ModeReplay
 		stepCfg.Recorded = a.replayRecorded
 	}
-	stepCtx := step.NewContext(stepCfg)
+	stepCtx, err := step.NewContext(stepCfg)
+	if err != nil {
+		return nil, fmt.Errorf("starling: build step.Context: %w", err)
+	}
 	ctx = step.WithContext(ctx, stepCtx)
 
 	// 1. Emit RunStarted.

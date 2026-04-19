@@ -82,7 +82,6 @@ AGENTS.md
 scratch/
 tmp/
 .tmp/
-temp_notes/
 
 # Stray binaries built by `go build ./examples/...` from repo root
 /m1_hello

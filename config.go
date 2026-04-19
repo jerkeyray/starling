@@ -28,6 +28,9 @@ type Config struct {
 }
 
 // Budget is re-exported from the budget package for callers that want
-// a single import path. The full enforcement landed in T11 / M3; M1
-// honours MaxInputTokens only (pre-call, inside step.LLMCall).
+// a single import path. All four axes are enforced end-to-end:
+// MaxInputTokens pre-call (step.LLMCall), MaxOutputTokens and MaxUSD
+// mid-stream on every usage chunk (step.LLMCall), MaxWallClock via
+// context.WithDeadline at the agent level. Zero on any field disables
+// that axis.
 type Budget = budget.Budget

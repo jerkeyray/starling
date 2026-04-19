@@ -19,7 +19,7 @@ func recordRun(t *testing.T, fn func(ctx context.Context)) []event.Event {
 	t.Helper()
 	log := eventlog.NewInMemory()
 	t.Cleanup(func() { _ = log.Close() })
-	c := step.NewContext(step.Config{Log: log, RunID: "rec"})
+	c := step.MustNewContext(step.Config{Log: log, RunID: "rec"})
 	fn(step.WithContext(context.Background(), c))
 	evs, err := log.Read(context.Background(), "rec")
 	if err != nil {
@@ -34,7 +34,7 @@ func replayCtx(t *testing.T, evs []event.Event) (context.Context, eventlog.Event
 	t.Helper()
 	log := eventlog.NewInMemory()
 	t.Cleanup(func() { _ = log.Close() })
-	c := step.NewContext(step.Config{
+	c := step.MustNewContext(step.Config{
 		Log:      log,
 		RunID:    "replay",
 		Mode:     step.ModeReplay,
@@ -179,7 +179,7 @@ func TestNewContext_ModeReplayWithoutRecordedPanics(t *testing.T) {
 			t.Fatal("expected panic")
 		}
 	}()
-	_ = step.NewContext(step.Config{
+	_ = step.MustNewContext(step.Config{
 		Log:   log,
 		RunID: "x",
 		Mode:  step.ModeReplay,
@@ -192,7 +192,7 @@ func TestLive_ClockFnOverride(t *testing.T) {
 	fixed := time.Unix(0, 1_700_000_000_000_000_000)
 	log := eventlog.NewInMemory()
 	defer log.Close()
-	c := step.NewContext(step.Config{
+	c := step.MustNewContext(step.Config{
 		Log:     log,
 		RunID:   "fc",
 		ClockFn: func() time.Time { return fixed },

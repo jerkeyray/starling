@@ -46,36 +46,56 @@ type Context struct {
 	prevHash []byte
 }
 
+// ErrInvalidConfig is returned by NewContext when cfg is missing a
+// required field (Log, RunID) or has an invalid field combination
+// (ModeReplay without Recorded). Callers that treat a bad config as a
+// programmer bug can panic on it explicitly; the function itself does
+// not.
+var ErrInvalidConfig = fmt.Errorf("step: invalid Config")
+
 // NewContext returns a Context primed to emit the first event of a run
 // (seq=1, prevHash=nil). cfg.Log and cfg.RunID are required; Provider
 // and Tools are optional at construction and only checked lazily by
-// LLMCall and CallTool respectively.
-func NewContext(cfg Config) *Context {
+// LLMCall and CallTool respectively. Returns an error wrapping
+// ErrInvalidConfig if cfg is malformed.
+func NewContext(cfg Config) (*Context, error) {
 	if cfg.Log == nil {
-		panic("step.NewContext: cfg.Log is nil")
+		return nil, fmt.Errorf("%w: cfg.Log is nil", ErrInvalidConfig)
 	}
 	if cfg.RunID == "" {
-		panic("step.NewContext: cfg.RunID is empty")
+		return nil, fmt.Errorf("%w: cfg.RunID is empty", ErrInvalidConfig)
 	}
 	if cfg.Mode == ModeReplay && cfg.Recorded == nil {
-		panic("step.NewContext: ModeReplay requires cfg.Recorded")
+		return nil, fmt.Errorf("%w: ModeReplay requires cfg.Recorded", ErrInvalidConfig)
 	}
 	clockFn := cfg.ClockFn
 	if clockFn == nil {
 		clockFn = time.Now
 	}
 	return &Context{
-		log:      cfg.Log,
-		runID:    cfg.RunID,
-		provider: cfg.Provider,
-		tools:    cfg.Tools,
-		budget:   cfg.Budget,
+		log:              cfg.Log,
+		runID:            cfg.RunID,
+		provider:         cfg.Provider,
+		tools:            cfg.Tools,
+		budget:           cfg.Budget,
 		mode:             cfg.Mode,
 		recorded:         cfg.Recorded,
 		clockFn:          clockFn,
 		maxParallelTools: cfg.MaxParallelTools,
 		nextSeq:          1,
+	}, nil
+}
+
+// MustNewContext is NewContext without the error return: it panics on
+// invalid config. Useful in test setup and in the agent loop where a
+// bad config is a programmer bug. Production callers should prefer
+// NewContext.
+func MustNewContext(cfg Config) *Context {
+	c, err := NewContext(cfg)
+	if err != nil {
+		panic(err)
 	}
+	return c
 }
 
 // RunID returns the run identifier associated with the context. Useful

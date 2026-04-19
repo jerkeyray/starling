@@ -63,7 +63,7 @@ func newLLMCtx(t *testing.T, p provider.Provider, budget step.BudgetConfig) (con
 	t.Helper()
 	log := eventlog.NewInMemory()
 	t.Cleanup(func() { _ = log.Close() })
-	c := step.NewContext(step.Config{
+	c := step.MustNewContext(step.Config{
 		Log:      log,
 		RunID:    "run-llm-1",
 		Provider: p,
