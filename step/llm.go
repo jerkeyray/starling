@@ -58,8 +58,12 @@ func LLMCall(ctx context.Context, req *provider.Request) (*provider.Response, er
 		return nil, ErrBudgetExceeded
 	}
 
-	// 2. Mint TurnID.
-	turnID := newULID()
+	// 2. Mint TurnID. In replay mode this reads the recorded TurnID
+	// at the current seq so TurnStarted's payload matches byte-for-byte.
+	turnID, err := c.mintTurnID()
+	if err != nil {
+		return nil, fmt.Errorf("step.LLMCall: mint TurnID: %w", err)
+	}
 
 	// 3. PromptHash over canonical CBOR of req.
 	promptHash, err := hashRequest(req)

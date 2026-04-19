@@ -14,6 +14,7 @@ import (
 	"github.com/jerkeyray/starling/internal/cborenc"
 	"github.com/jerkeyray/starling/internal/merkle"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/replay"
 	"github.com/jerkeyray/starling/step"
 	"github.com/jerkeyray/starling/tool"
 	"github.com/oklog/ulid/v2"
@@ -40,6 +41,13 @@ type Agent struct {
 
 	// Config carries model / system prompt / params / MaxTurns.
 	Config Config
+
+	// replayRecorded, when non-nil, switches Run into replay mode:
+	// step.Context operates under ModeReplay, the RunID is pulled from
+	// the first recorded event rather than freshly minted, and every
+	// emit() compares against the recorded event at the matching seq.
+	// Set exclusively by replay.Verify; not part of the public API.
+	replayRecorded []event.Event
 }
 
 // Run starts a new agent run against the configured provider + tools.
@@ -54,16 +62,26 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 		return nil, err
 	}
 
-	runID := newULID()
+	var runID string
+	if len(a.replayRecorded) > 0 {
+		runID = a.replayRecorded[0].RunID
+	} else {
+		runID = newULID()
+	}
 	startWall := time.Now()
 
-	stepCtx := step.NewContext(step.Config{
+	stepCfg := step.Config{
 		Log:      a.Log,
 		RunID:    runID,
 		Provider: a.Provider,
 		Tools:    step.NewRegistry(a.Tools...),
 		Budget:   step.BudgetConfig{MaxInputTokens: budgetInputCap(a.Budget)},
-	})
+	}
+	if len(a.replayRecorded) > 0 {
+		stepCfg.Mode = step.ModeReplay
+		stepCfg.Recorded = a.replayRecorded
+	}
+	stepCtx := step.NewContext(stepCfg)
 	ctx = step.WithContext(ctx, stepCtx)
 
 	// 1. Emit RunStarted.
@@ -306,6 +324,46 @@ func (a *Agent) buildResult(runID string, startWall time.Time, term event.Kind) 
 		TerminalKind:  term,
 		MerkleRoot:    root,
 	}, readErr
+}
+
+// RunReplay re-executes the agent in replay mode against recorded.
+// Intended for callers of the replay package; not part of the normal
+// user flow. Goal, RunID, and provider streams are all reconstructed
+// from recorded; the original Provider and Log are overridden (the
+// Provider by a replay provider, the Log by a fresh in-memory log)
+// so the live side is fully isolated from the recording.
+//
+// Returns nil on a clean byte-matching replay. On divergence, returns
+// an error that wraps step.ErrReplayMismatch — the replay package
+// wraps that further into ErrNonDeterminism.
+func (a *Agent) RunReplay(ctx context.Context, recorded []event.Event) error {
+	if len(recorded) == 0 {
+		return fmt.Errorf("starling: RunReplay called with no recorded events")
+	}
+	rs, err := recorded[0].AsRunStarted()
+	if err != nil {
+		return fmt.Errorf("starling: RunReplay: decode RunStarted: %w", err)
+	}
+
+	// Build a replay provider backed by the recorded stream. Info
+	// comes from the recorded RunStarted so the provider ID / API
+	// version match at emit-compare time.
+	replayProv, err := replay.NewProvider(provider.Info{ID: rs.ProviderID, APIVersion: rs.APIVersion}, recorded)
+	if err != nil {
+		return err
+	}
+
+	// Shallow clone so we don't mutate the caller's Agent. Override
+	// the transient fields: Provider (replay), Log (fresh in-memory),
+	// and set replayRecorded so Run() flips into replay mode.
+	clone := *a
+	clone.Provider = replayProv
+	clone.Log = eventlog.NewInMemory()
+	clone.replayRecorded = recorded
+	defer clone.Log.Close()
+
+	_, runErr := clone.Run(ctx, rs.Goal)
+	return runErr
 }
 
 // validate checks the Agent's required fields before Run starts. Kept
