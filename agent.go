@@ -11,6 +11,7 @@ import (
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/internal/cborenc"
+	"github.com/jerkeyray/starling/internal/merkle"
 	"github.com/jerkeyray/starling/provider"
 	"github.com/jerkeyray/starling/step"
 	"github.com/jerkeyray/starling/tool"
@@ -206,11 +207,11 @@ func (a *Agent) emitTerminal(ctx context.Context, sc *step.Context, runErr error
 	if err != nil {
 		return 0, fmt.Errorf("read log: %w", err)
 	}
-	hashes, err := eventHashes(evs)
+	hashes, err := merkle.EventHashes(evs)
 	if err != nil {
 		return 0, fmt.Errorf("hash events: %w", err)
 	}
-	root := merkleRoot(hashes)
+	root := merkle.Root(hashes)
 
 	// Aggregate counts / cost from the already-emitted events so the
 	// terminal payload matches what replay would compute.

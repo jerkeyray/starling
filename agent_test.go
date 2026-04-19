@@ -115,6 +115,9 @@ func TestAgent_TextOnly_OneTurnCompletes(t *testing.T) {
 	if got := kindsOf(evs); !kindsEq(got, want) {
 		t.Fatalf("kinds = %v\n want %v", got, want)
 	}
+	if err := eventlog.Validate(evs); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
 }
 
 func TestAgent_ToolRoundTrip(t *testing.T) {

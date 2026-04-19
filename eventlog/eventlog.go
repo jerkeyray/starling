@@ -46,3 +46,8 @@ var ErrLogClosed = errors.New("eventlog: log is closed")
 // failure (wrong Seq, mismatched PrevHash, non-empty PrevHash on first event,
 // etc.). Callers can test with errors.Is(err, ErrInvalidAppend).
 var ErrInvalidAppend = errors.New("eventlog: invalid append")
+
+// ErrLogCorrupt is the base sentinel wrapped by every Validate failure.
+// Callers can test with errors.Is(err, ErrLogCorrupt). Re-exported from
+// the root starling package as starling.ErrLogCorrupt.
+var ErrLogCorrupt = errors.New("eventlog: log failed validation")

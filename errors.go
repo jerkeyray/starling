@@ -3,6 +3,8 @@ package starling
 import (
 	"errors"
 	"fmt"
+
+	"github.com/jerkeyray/starling/eventlog"
 )
 
 // Sentinel errors surfaced by Agent.Run. Tests and callers route on
@@ -25,8 +27,10 @@ var (
 	// ErrRunNotFound is reserved for Resume/Replay.
 	ErrRunNotFound = errors.New("starling: run not found in log")
 
-	// ErrLogCorrupt is reserved for integrity-check failures.
-	ErrLogCorrupt = errors.New("starling: log failed validation")
+	// ErrLogCorrupt wraps every eventlog.Validate failure. Aliased
+	// from the eventlog package so callers that never import eventlog
+	// directly can still route on it.
+	ErrLogCorrupt = eventlog.ErrLogCorrupt
 )
 
 // ToolError wraps an error returned by a tool invocation with the
