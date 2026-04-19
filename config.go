@@ -1,6 +1,8 @@
 package starling
 
 import (
+	"log/slog"
+
 	"github.com/jerkeyray/starling/budget"
 	"github.com/jerkeyray/starling/internal/cborenc"
 )
@@ -25,6 +27,17 @@ type Config struct {
 	// MaxTurns caps how many assistant/tool cycles the loop will run.
 	// 0 means unlimited — not recommended.
 	MaxTurns int
+
+	// Logger receives structured slog records covering the run lifecycle:
+	// RunStarted, per-turn start, budget trips, tool retries, and the
+	// terminal event. Every record carries a "run_id" attribute; per-turn
+	// and per-tool records add "turn_id" / "call_id".
+	//
+	// The event log remains the source of truth for auditing — Logger is
+	// a side-channel trace for operators watching live runs. If nil, the
+	// process-wide slog.Default() is used; pass a discard logger to
+	// silence library output entirely.
+	Logger *slog.Logger
 }
 
 // Budget is re-exported from the budget package for callers that want

@@ -2,6 +2,7 @@ package step
 
 import (
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/jerkeyray/starling/event"
@@ -58,6 +59,13 @@ type Config struct {
 	// serializes parallel dispatch, useful for debugging. Ignored by
 	// single-tool CallTool.
 	MaxParallelTools int
+
+	// Logger receives structured records from the step helpers for
+	// budget trips and tool retries. If nil, the Context falls back to
+	// a discard handler — step code never panics on a missing logger.
+	// The agent loop sets this from starling.Config.Logger with run_id
+	// already bound.
+	Logger *slog.Logger
 }
 
 // DefaultMaxParallelTools is the fan-out cap used by CallTools when

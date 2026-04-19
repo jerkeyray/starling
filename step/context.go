@@ -3,12 +3,14 @@ package step
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/internal/cborenc"
+	"github.com/jerkeyray/starling/internal/obs"
 	"github.com/jerkeyray/starling/provider"
 )
 
@@ -41,6 +43,11 @@ type Context struct {
 	// 0 means use DefaultMaxParallelTools.
 	maxParallelTools int
 
+	// logger is the slog.Logger shared across the run, with run_id
+	// already bound. Never nil — NewContext substitutes a discard
+	// logger when cfg.Logger is nil so call sites can assume a logger.
+	logger *slog.Logger
+
 	mu       sync.Mutex
 	nextSeq  uint64
 	prevHash []byte
@@ -72,6 +79,10 @@ func NewContext(cfg Config) (*Context, error) {
 	if clockFn == nil {
 		clockFn = time.Now
 	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = obs.Discard()
+	}
 	return &Context{
 		log:              cfg.Log,
 		runID:            cfg.RunID,
@@ -82,6 +93,7 @@ func NewContext(cfg Config) (*Context, error) {
 		recorded:         cfg.Recorded,
 		clockFn:          clockFn,
 		maxParallelTools: cfg.MaxParallelTools,
+		logger:           logger,
 		nextSeq:          1,
 	}, nil
 }
@@ -102,6 +114,12 @@ func MustNewContext(cfg Config) *Context {
 // for tools / tests that need to correlate external state with the
 // current run.
 func (c *Context) RunID() string { return c.runID }
+
+// Logger returns the slog.Logger bound to this run. Never nil: returns
+// a discard logger when the agent was built without one. Intended for
+// the agent loop and downstream tool implementations that want to
+// participate in the run's structured trace.
+func (c *Context) Logger() *slog.Logger { return c.logger }
 
 // prov returns the provider configured on this Context, or nil if none.
 func (c *Context) prov() provider.Provider { return c.provider }

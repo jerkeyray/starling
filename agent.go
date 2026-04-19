@@ -13,6 +13,7 @@ import (
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/internal/cborenc"
 	"github.com/jerkeyray/starling/internal/merkle"
+	"github.com/jerkeyray/starling/internal/obs"
 	"github.com/jerkeyray/starling/provider"
 	"github.com/jerkeyray/starling/replay"
 	"github.com/jerkeyray/starling/step"
@@ -84,12 +85,15 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 		defer cancel()
 	}
 
+	logger := obs.Resolve(a.Config.Logger).With(obs.AttrRunID, runID)
+
 	stepCfg := step.Config{
 		Log:      a.Log,
 		RunID:    runID,
 		Provider: a.Provider,
 		Tools:    step.NewRegistry(a.Tools...),
 		Budget:   budgetStepConfig(a.Budget),
+		Logger:   logger,
 	}
 	if len(a.replayRecorded) > 0 {
 		stepCfg.Mode = step.ModeReplay
@@ -105,6 +109,7 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	if err := a.emitRunStarted(ctx, stepCtx, goal); err != nil {
 		return nil, fmt.Errorf("starling: emit RunStarted: %w", err)
 	}
+	logger.Info("run started", "model", a.Config.Model)
 
 	// 2. Run the ReAct loop, catching the terminal reason.
 	runErr := a.react(ctx, goal)
@@ -119,6 +124,18 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 			return nil, runErr
 		}
 		return nil, terr
+	}
+
+	// Log the terminal outcome. RunFailed escalates to Error; normal
+	// completion and cancellation are informational.
+	termAttrs := []any{obs.AttrKind, term.String(), obs.AttrDurMs, time.Since(startWall).Milliseconds()}
+	switch term {
+	case event.KindRunFailed:
+		logger.Error("run failed", append(termAttrs, "err", errString(runErr))...)
+	case event.KindRunCancelled:
+		logger.Info("run cancelled", termAttrs...)
+	default:
+		logger.Info("run completed", termAttrs...)
 	}
 
 	result, readErr := a.buildResult(runID, startWall, term)
@@ -145,10 +162,15 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 		maxTurns = 16 // conservative default; callers can override
 	}
 
+	sc, _ := step.From(ctx)
+	logger := sc.Logger()
+
 	for turn := 0; turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
+		logger.Debug("turn start", "turn", turn)
 
 		req := &provider.Request{
 			Model:        a.Config.Model,
@@ -585,6 +607,17 @@ func budgetLimits(b *Budget) *event.BudgetLimits {
 		MaxUSD:          b.MaxUSD,
 		MaxWallClockMs:  b.MaxWallClock.Milliseconds(),
 	}
+}
+
+// errString renders err for log attrs without panicking on nil. The
+// terminal slog lines use it because a RunFailed can be triggered by
+// a non-error path (e.g. MaxTurnsExceeded) that still benefits from
+// an attribute.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func classifyRunError(err error) string {

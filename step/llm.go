@@ -14,6 +14,7 @@ import (
 	"github.com/jerkeyray/starling/budget"
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/internal/cborenc"
+	"github.com/jerkeyray/starling/internal/obs"
 	"github.com/jerkeyray/starling/provider"
 	"github.com/oklog/ulid/v2"
 )
@@ -55,6 +56,11 @@ func LLMCall(ctx context.Context, req *provider.Request) (*provider.Response, er
 		}); err != nil {
 			return nil, fmt.Errorf("step.LLMCall: emit BudgetExceeded: %w", err)
 		}
+		c.logger.Warn("budget exceeded",
+			obs.AttrLimit, "input_tokens",
+			obs.AttrCap, cap,
+			obs.AttrActual, est,
+			"where", "pre_call")
 		return nil, ErrBudgetExceeded
 	}
 
@@ -204,6 +210,12 @@ drain:
 					}); err != nil {
 						return nil, fmt.Errorf("step.LLMCall: emit BudgetExceeded: %w", err)
 					}
+					c.logger.Warn("budget exceeded",
+						obs.AttrLimit, limit,
+						obs.AttrCap, cap,
+						obs.AttrActual, actual,
+						obs.AttrTurnID, turnID,
+						"where", "mid_stream")
 					return nil, ErrBudgetExceeded
 				}
 			}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jerkeyray/starling/event"
+	"github.com/jerkeyray/starling/internal/obs"
 	"github.com/jerkeyray/starling/tool"
 )
 
@@ -349,6 +350,11 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 		}); emitErr != nil {
 			return nil, errors.Join(fmt.Errorf("step.CallTool: emit Failed: %w", emitErr), execErr)
 		}
+		c.logger.Warn("tool transient failure, retrying",
+			obs.AttrToolName, call.Name,
+			obs.AttrCallID, call.CallID,
+			obs.AttrAttempt, attempt,
+			"err", execErr.Error())
 		if c.mode != ModeReplay {
 			select {
 			case <-time.After(backoffFn(attempt)):
