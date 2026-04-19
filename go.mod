@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.37.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
