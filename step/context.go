@@ -8,6 +8,7 @@ import (
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
+	"github.com/jerkeyray/starling/internal/cborenc"
 	"github.com/jerkeyray/starling/provider"
 )
 
@@ -186,6 +187,38 @@ func (c *Context) mintTurnID() (string, error) {
 		return "", fmt.Errorf("%w: seq=%d decode TurnStarted: %v", ErrReplayMismatch, rec.Seq, err)
 	}
 	return ts.TurnID, nil
+}
+
+// ReplayDurationMs returns the duration_ms value from the event
+// recorded at the next seq position during replay; in live mode it
+// returns fallback unchanged. Wall-clock durations are inherently
+// non-deterministic (live and replay take different amounts of time,
+// especially under the race detector), so any event carrying a
+// DurationMs field must route its value through this helper before
+// emission to keep emit-compare happy.
+//
+// Applies to ToolCallCompleted, ToolCallFailed, RunCompleted,
+// RunCancelled, and RunFailed — every event whose payload includes a
+// `duration_ms` CBOR field. The helper decodes only that one field, so
+// it's robust to unrelated schema additions on those payload types.
+func ReplayDurationMs(ctx context.Context, fallback int64) int64 {
+	c := mustFrom(ctx, "ReplayDurationMs")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mode != ModeReplay {
+		return fallback
+	}
+	idx := int(c.nextSeq - 1)
+	if idx >= len(c.recorded) {
+		return fallback
+	}
+	var tmp struct {
+		DurationMs int64 `cbor:"duration_ms"`
+	}
+	if err := cborenc.Unmarshal(c.recorded[idx].Payload, &tmp); err != nil {
+		return fallback
+	}
+	return tmp.DurationMs
 }
 
 // bytesEqual avoids importing "bytes" just for one comparison.

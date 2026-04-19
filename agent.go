@@ -272,7 +272,10 @@ func (a *Agent) emitRunStarted(ctx context.Context, sc *step.Context, goal strin
 // computes the Merkle root over every event already in the log (which
 // excludes the terminal itself by design), and appends the terminal.
 func (a *Agent) emitTerminal(ctx context.Context, sc *step.Context, runErr error, startWall time.Time) (event.Kind, error) {
-	durMs := time.Since(startWall).Milliseconds()
+	// Wall-clock durations don't round-trip under replay (live and
+	// replay take different real time), so on replay we substitute the
+	// recorded value. step.ReplayDurationMs is a no-op in live mode.
+	durMs := step.ReplayDurationMs(ctx, time.Since(startWall).Milliseconds())
 
 	// Pull everything already logged under this run to compute the
 	// Merkle root. Uses a detached ctx so a cancelled outer ctx

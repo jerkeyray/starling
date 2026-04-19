@@ -91,7 +91,9 @@ func CallTool(ctx context.Context, call ToolCall) (json.RawMessage, error) {
 
 	start := time.Now()
 	result, execErr := runToolSafely(ctx, tl, call.Args)
-	durMs := time.Since(start).Milliseconds()
+	// Wall-clock durations don't survive replay; substitute the recorded
+	// value when we're verifying a log so emit-compare stays byte-exact.
+	durMs := ReplayDurationMs(ctx, time.Since(start).Milliseconds())
 
 	if execErr == nil {
 		resultRaw := result
@@ -277,7 +279,7 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 
 	start := time.Now()
 	result, execErr := runToolSafely(ctx, tl, call.Args)
-	durMs := time.Since(start).Milliseconds()
+	durMs := ReplayDurationMs(ctx, time.Since(start).Milliseconds())
 
 	if execErr == nil {
 		resultRaw := result
