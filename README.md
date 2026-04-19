@@ -218,6 +218,28 @@ Observability & multi-tenant:
 - `Agent.Namespace` prefixes RunIDs so one event log can host many
   tenants safely
 
+## Inspector
+
+`starling-inspect` is a single binary that opens a SQLite event log
+read-only and serves a self-contained web UI on localhost: runs list,
+event timeline, per-event detail, and a hash-chain validation badge.
+No CDN, no JS build step, no auth (loopback only by default).
+
+```sh
+go install github.com/jerkeyray/starling/cmd/starling-inspect@latest
+starling-inspect /path/to/runs.db
+```
+
+Or, with no API keys and no real run, the one-command demo:
+
+```sh
+make demo-inspect
+```
+
+See [`docs/INSPECT.md`](./docs/INSPECT.md) for flags, the security
+model (read-only by construction, localhost-only by default), and
+what's deferred to M5.
+
 ## Observability
 
 Three layers, mix and match: the **event log** (audit trail),
@@ -235,6 +257,7 @@ picture and §6.2 for the synchronous-write / backpressure contract.
 - [`docs/EVENTS.md`](./docs/EVENTS.md) — event schema + CBOR wire format
 - [`docs/REPLAY.md`](./docs/REPLAY.md) — replay cookbook
 - [`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md) — provider feature matrix
+- [`docs/INSPECT.md`](./docs/INSPECT.md) — `starling-inspect` web inspector
 - [`docs/M2_PLAN.md`](./docs/M2_PLAN.md) — M2 scope + status
 
 ## License

@@ -164,6 +164,18 @@ func (e Event) AsTurnStarted() (TurnStarted, error)
 func (e Event) AsAssistantMessageCompleted() (AssistantMessageCompleted, error)
 func (e Event) AsToolCallScheduled() (ToolCallScheduled, error)
 // ... one per kind
+
+// ToJSON projects an event's payload to JSON. The shape mirrors the
+// canonical CBOR exactly — every payload struct's `cbor:"..."` tags
+// are mirrored as `json:"..."`. Intended for inspectors, log dumps,
+// and tooling that wants a human-readable view; the canonical wire
+// format remains CBOR. Byte-slice fields (PrevHash, raw response
+// hashes, CBOR-encoded tool args) appear as base64 — that's how
+// `encoding/json` handles `[]byte`.
+//
+// Function, not a method: the JSON projection is an external concern
+// and a free function keeps `Event` itself decoder-shaped.
+func ToJSON(ev Event) ([]byte, error)
 ```
 
 ---
@@ -182,11 +194,48 @@ type EventLog interface {
 func NewInMemory() EventLog
 
 // SQLite-backed implementation (M2). Default durable backend. Pure Go via modernc.org/sqlite.
-func NewSQLite(path string) (EventLog, error)
+func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error)
 
 // Postgres-backed implementation (M2). For users with existing Postgres infra.
 // Caller supplies the *sql.DB so connection pooling / migrations stay in their control.
 func NewPostgres(db *sql.DB) (EventLog, error)
+
+// SQLiteOption tunes SQLite open behavior.
+type SQLiteOption func(*sqliteConfig)
+
+// WithReadOnly opens the database with `?mode=ro`. Append always
+// returns ErrReadOnly. Intended for inspector-style tools that must
+// not mutate the audit log they are inspecting. Crucially does NOT
+// pass `immutable=1`: a read-only handle remains correct against a
+// database that another Starling process is actively writing to,
+// because WAL + change-counter checks stay in effect.
+func WithReadOnly() SQLiteOption
+
+// ErrReadOnly is returned by Append on a handle opened WithReadOnly.
+var ErrReadOnly = errors.New("eventlog: log is read-only")
+
+// RunLister is an OPTIONAL interface for backends that can enumerate
+// the runs they hold. It is intentionally NOT part of EventLog so
+// write-only / forwarding backends are not forced to support it.
+// Both built-in backends (NewInMemory, NewSQLite) satisfy it; type-
+// assert when you need to enumerate:
+//
+//     lister, ok := log.(eventlog.RunLister)
+//     if !ok { ... }
+//     summaries, err := lister.ListRuns(ctx)
+type RunLister interface {
+    ListRuns(ctx context.Context) ([]RunSummary, error)
+}
+
+// RunSummary is the minimum needed to render a runs-list view —
+// inspectors, dashboards, scripts that triage failed runs. Sorted
+// newest-first by StartedAt.
+type RunSummary struct {
+    RunID        string
+    StartedAt    time.Time  // wall-clock time of the first event
+    LastSeq      uint64     // doubles as event count: events are 1-indexed
+    TerminalKind event.Kind // 0 if the run never terminated (still in progress)
+}
 ```
 
 ---
