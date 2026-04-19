@@ -52,7 +52,17 @@ type Config struct {
 	// to time.Now. Tests inject a fake clock; under ModeReplay it is
 	// never invoked (the recorded value is returned).
 	ClockFn func() time.Time
+
+	// MaxParallelTools caps concurrent tool executions dispatched by
+	// CallTools. Zero selects the default (8). A value of 1 effectively
+	// serializes parallel dispatch, useful for debugging. Ignored by
+	// single-tool CallTool.
+	MaxParallelTools int
 }
+
+// DefaultMaxParallelTools is the fan-out cap used by CallTools when
+// Config.MaxParallelTools is zero.
+const DefaultMaxParallelTools = 8
 
 // BudgetConfig holds the subset of budget caps enforced by the step
 // package in M1. The full Budget struct (wall-clock, USD, output) lives

@@ -158,8 +158,12 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 			return nil
 		}
 
-		// Dispatch each planned tool call sequentially (M1).
-		for _, tu := range resp.ToolUses {
+		// Dispatch planned tool calls. Single-tool turns stay on the
+		// sequential CallTool path (no goroutine overhead); multi-tool
+		// turns fan out through CallTools with a semaphore so total
+		// latency is max(tool_i) rather than sum(tool_i).
+		if len(resp.ToolUses) == 1 {
+			tu := resp.ToolUses[0]
 			result, cerr := step.CallTool(ctx, step.ToolCall{
 				CallID: tu.CallID,
 				TurnID: resp.TurnID,
@@ -167,8 +171,6 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 				Args:   tu.Args,
 			})
 			if cerr != nil {
-				// Any tool failure bubbles up as a ToolError; agent loop
-				// surrenders and the terminal event classifies.
 				if errors.Is(cerr, context.Canceled) || errors.Is(cerr, context.DeadlineExceeded) {
 					return cerr
 				}
@@ -181,6 +183,45 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 					Content: string(result),
 				},
 			})
+		} else {
+			calls := make([]step.ToolCall, len(resp.ToolUses))
+			for i, tu := range resp.ToolUses {
+				calls[i] = step.ToolCall{
+					CallID: tu.CallID,
+					TurnID: resp.TurnID,
+					Name:   tu.Name,
+					Args:   tu.Args,
+				}
+			}
+			results, cerr := step.CallTools(ctx, calls)
+			if cerr != nil {
+				// Only dispatch-level errors (emit failures, replay
+				// mismatch) surface here. Per-tool errors live inside
+				// the returned results.
+				return cerr
+			}
+			// Check ctx first: if the run was cancelled mid-batch, a
+			// tool may have returned ctx.Err() — surface that as the
+			// terminal cause rather than a per-tool ToolError.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			for i, res := range results {
+				tu := resp.ToolUses[i]
+				if res.Err != nil {
+					if errors.Is(res.Err, context.Canceled) || errors.Is(res.Err, context.DeadlineExceeded) {
+						return res.Err
+					}
+					return &ToolError{Name: tu.Name, CallID: tu.CallID, Err: res.Err}
+				}
+				msgs = append(msgs, provider.Message{
+					Role: provider.RoleTool,
+					ToolResult: &provider.ToolResult{
+						CallID:  tu.CallID,
+						Content: string(res.Result),
+					},
+				})
+			}
 		}
 	}
 

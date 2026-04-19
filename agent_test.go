@@ -372,6 +372,69 @@ func TestAgent_ToolRegistryHashStableUnderReorder(t *testing.T) {
 	}
 }
 
+// TestAgent_ParallelToolDispatch_ReplayMatches exercises the two-tool
+// fan-out path: turn 1 plans two tools at once, turn 2 produces final
+// text. The live run races the two tools; replay dispatches them in
+// recorded completion order and must reproduce the log byte-for-byte.
+func TestAgent_ParallelToolDispatch_ReplayMatches(t *testing.T) {
+	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+		{
+			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
+			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"a"}`}},
+			{Kind: provider.ChunkToolUseEnd, ToolUse: &provider.ToolUseChunk{CallID: "c1"}},
+			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c2", Name: "echo"}},
+			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c2", ArgsDelta: `{"msg":"b"}`}},
+			{Kind: provider.ChunkToolUseEnd, ToolUse: &provider.ToolUseChunk{CallID: "c2"}},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 10, OutputTokens: 5}},
+			{Kind: provider.ChunkEnd, StopReason: "tool_use"},
+		},
+		{
+			{Kind: provider.ChunkText, Text: "done"},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 20, OutputTokens: 3}},
+			{Kind: provider.ChunkEnd, StopReason: "stop"},
+		},
+	}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+
+	a := &starling.Agent{
+		Provider: p,
+		Tools:    []tool.Tool{echoTool()},
+		Log:      log,
+		Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
+	}
+	res, err := a.Run(context.Background(), "do both")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.TerminalKind != event.KindRunCompleted {
+		t.Fatalf("TerminalKind = %s, want RunCompleted", res.TerminalKind)
+	}
+
+	// Both tools' Scheduled events must appear in provider-plan order
+	// (c1, c2), regardless of which Completed landed first.
+	evs, err := log.Read(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	var sched []string
+	for _, ev := range evs {
+		if ev.Kind == event.KindToolCallScheduled {
+			s, _ := ev.AsToolCallScheduled()
+			sched = append(sched, s.CallID)
+		}
+	}
+	if len(sched) != 2 || sched[0] != "c1" || sched[1] != "c2" {
+		t.Fatalf("Scheduled order = %v, want [c1 c2]", sched)
+	}
+
+	// Replay should reproduce the run byte-for-byte even though the
+	// live run raced.
+	if err := starling.Replay(context.Background(), log, res.RunID, a); err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+}
+
 // ---- tiny helpers --------------------------------------------------------
 
 func kindsEq(a, b []event.Kind) bool {

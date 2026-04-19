@@ -36,6 +36,10 @@ type Context struct {
 	replayIdx int
 	clockFn   func() time.Time
 
+	// maxParallelTools caps concurrent tool execution for CallTools.
+	// 0 means use DefaultMaxParallelTools.
+	maxParallelTools int
+
 	mu       sync.Mutex
 	nextSeq  uint64
 	prevHash []byte
@@ -65,10 +69,11 @@ func NewContext(cfg Config) *Context {
 		provider: cfg.Provider,
 		tools:    cfg.Tools,
 		budget:   cfg.Budget,
-		mode:     cfg.Mode,
-		recorded: cfg.Recorded,
-		clockFn:  clockFn,
-		nextSeq:  1,
+		mode:             cfg.Mode,
+		recorded:         cfg.Recorded,
+		clockFn:          clockFn,
+		maxParallelTools: cfg.MaxParallelTools,
+		nextSeq:          1,
 	}
 }
 

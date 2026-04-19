@@ -230,6 +230,159 @@ func TestCallTool_NotFound(t *testing.T) {
 	}
 }
 
+// slowTool sleeps for d then echoes msg. Used by the CallTools
+// latency test to prove fan-out actually overlaps execution.
+func slowTool(name string, d time.Duration) tool.Tool {
+	return tool.Typed(name, "slow echo", func(ctx context.Context, in echoIn) (echoOut, error) {
+		select {
+		case <-ctx.Done():
+			return echoOut{}, ctx.Err()
+		case <-time.After(d):
+			return echoOut{Got: in.Msg}, nil
+		}
+	})
+}
+
+func TestCallTools_ParallelLatency(t *testing.T) {
+	const each = 150 * time.Millisecond
+	reg := step.NewRegistry(slowTool("s1", each), slowTool("s2", each), slowTool("s3", each))
+	ctx, log := newToolsCtx(t, reg)
+
+	calls := []step.ToolCall{
+		{CallID: "c1", TurnID: "t1", Name: "s1", Args: json.RawMessage(`{"msg":"a"}`)},
+		{CallID: "c2", TurnID: "t1", Name: "s2", Args: json.RawMessage(`{"msg":"b"}`)},
+		{CallID: "c3", TurnID: "t1", Name: "s3", Args: json.RawMessage(`{"msg":"c"}`)},
+	}
+	start := time.Now()
+	results, err := step.CallTools(ctx, calls)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+	if elapsed > each*2 {
+		t.Fatalf("elapsed = %v, want ~%v (fan-out did not overlap)", elapsed, each)
+	}
+	if len(results) != 3 {
+		t.Fatalf("len(results) = %d", len(results))
+	}
+	// Results preserve input order even if completions raced.
+	for i, res := range results {
+		if res.Err != nil {
+			t.Fatalf("results[%d].Err = %v", i, res.Err)
+		}
+		if res.CallID != calls[i].CallID {
+			t.Fatalf("results[%d].CallID = %q, want %q", i, res.CallID, calls[i].CallID)
+		}
+	}
+
+	evs := readAllTools(t, log)
+	// Three Scheduled events must be in input order, regardless of
+	// completion race.
+	var scheduledIDs []string
+	for _, ev := range evs {
+		if ev.Kind == event.KindToolCallScheduled {
+			s, _ := ev.AsToolCallScheduled()
+			scheduledIDs = append(scheduledIDs, s.CallID)
+		}
+	}
+	want := []string{"c1", "c2", "c3"}
+	for i := range want {
+		if scheduledIDs[i] != want[i] {
+			t.Fatalf("scheduled order = %v, want %v", scheduledIDs, want)
+		}
+	}
+	// All three Scheduled events land before any Completed (input-
+	// order contiguity invariant).
+	sawCompleted := false
+	for _, ev := range evs {
+		switch ev.Kind {
+		case event.KindToolCallCompleted:
+			sawCompleted = true
+		case event.KindToolCallScheduled:
+			if sawCompleted {
+				t.Fatalf("Scheduled event at seq=%d landed after a Completed event", ev.Seq)
+			}
+		}
+	}
+}
+
+func TestCallTools_SemaphoreCapOne(t *testing.T) {
+	// With MaxParallelTools=1, two 100ms tools must take ~200ms.
+	const each = 100 * time.Millisecond
+	reg := step.NewRegistry(slowTool("s1", each), slowTool("s2", each))
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+	c := step.NewContext(step.Config{
+		Log:              log,
+		RunID:            "run-tool-1",
+		Tools:            reg,
+		MaxParallelTools: 1,
+	})
+	ctx := step.WithContext(context.Background(), c)
+
+	start := time.Now()
+	_, err := step.CallTools(ctx, []step.ToolCall{
+		{CallID: "c1", Name: "s1", Args: json.RawMessage(`{"msg":"a"}`)},
+		{CallID: "c2", Name: "s2", Args: json.RawMessage(`{"msg":"b"}`)},
+	})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+	if elapsed < each*2-20*time.Millisecond {
+		t.Fatalf("elapsed = %v, want >= ~%v (cap=1 did not serialize)", elapsed, each*2)
+	}
+}
+
+func TestCallTools_IndividualFailureDoesNotKillBatch(t *testing.T) {
+	sentinel := errors.New("bad input")
+	reg := step.NewRegistry(echoTool(), errTool(sentinel))
+	ctx, log := newToolsCtx(t, reg)
+
+	results, err := step.CallTools(ctx, []step.ToolCall{
+		{CallID: "c1", Name: "echo", Args: json.RawMessage(`{"msg":"ok"}`)},
+		{CallID: "c2", Name: "boom"},
+	})
+	if err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+	if results[0].Err != nil {
+		t.Fatalf("results[0].Err = %v, want nil", results[0].Err)
+	}
+	if !errors.Is(results[1].Err, sentinel) {
+		t.Fatalf("results[1].Err = %v, want sentinel", results[1].Err)
+	}
+	// Log contains one Completed and one Failed — proves the good
+	// tool still emitted even though its sibling failed.
+	evs := readAllTools(t, log)
+	var completed, failed int
+	for _, ev := range evs {
+		switch ev.Kind {
+		case event.KindToolCallCompleted:
+			completed++
+		case event.KindToolCallFailed:
+			failed++
+		}
+	}
+	if completed != 1 || failed != 1 {
+		t.Fatalf("completed=%d failed=%d, want 1 and 1", completed, failed)
+	}
+}
+
+func TestCallTools_EmptyBatchNoop(t *testing.T) {
+	ctx, log := newToolsCtx(t, step.NewRegistry(echoTool()))
+	results, err := step.CallTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+	if results != nil {
+		t.Fatalf("results = %v, want nil", results)
+	}
+	if evs := readAllTools(t, log); len(evs) != 0 {
+		t.Fatalf("empty batch emitted %d events", len(evs))
+	}
+}
+
 func TestCallTool_PanicsWithoutContext(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
