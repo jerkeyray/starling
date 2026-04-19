@@ -180,6 +180,33 @@ drain:
 			if chunk.Usage != nil {
 				usage = *chunk.Usage
 			}
+			// Mid-stream enforcement. Providers report cumulative usage
+			// (Anthropic updates across message_delta events, OpenAI
+			// once at EOF), so each ChunkUsage is a fresh snapshot to
+			// re-check against the caps. Trip emits BudgetExceeded
+			// carrying the partial text + tokens seen so far, then
+			// unwinds with ErrBudgetExceeded; the agent loop classifies
+			// into RunFailed{ErrorType:"budget"}.
+			if cfg := c.budgetCfg(); cfg.MaxOutputTokens > 0 || cfg.MaxUSD > 0 {
+				limit, cap, actual := budget.Enforce(
+					budget.Budget{MaxOutputTokens: cfg.MaxOutputTokens, MaxUSD: cfg.MaxUSD},
+					req.Model, usage.InputTokens, usage.OutputTokens, time.Time{},
+				)
+				if limit != "" {
+					if err := emit(ctx, c, event.KindBudgetExceeded, event.BudgetExceeded{
+						Limit:         limit,
+						Cap:           cap,
+						Actual:        actual,
+						Where:         "mid_stream",
+						TurnID:        turnID,
+						PartialText:   textBuf.String(),
+						PartialTokens: usage.OutputTokens,
+					}); err != nil {
+						return nil, fmt.Errorf("step.LLMCall: emit BudgetExceeded: %w", err)
+					}
+					return nil, ErrBudgetExceeded
+				}
+			}
 		case provider.ChunkEnd:
 			// Flush any reasoning text that never received a trailing
 			// signature (OpenAI-family reasoning summaries); signature

@@ -64,12 +64,17 @@ type Config struct {
 // Config.MaxParallelTools is zero.
 const DefaultMaxParallelTools = 8
 
-// BudgetConfig holds the subset of budget caps enforced by the step
-// package in M1. The full Budget struct (wall-clock, USD, output) lives
-// in the budget package and arrives in T11.
+// BudgetConfig holds the budget caps enforced inside the step package.
+// MaxInputTokens is checked pre-call; MaxOutputTokens and MaxUSD are
+// checked mid-stream after every ChunkUsage. Wall-clock enforcement
+// lives at the agent level (via context.WithDeadline) so it can
+// preempt blocking calls the step layer doesn't control.
+//
+// Zero on any field disables that axis.
 type BudgetConfig struct {
-	// MaxInputTokens caps per-call input tokens. 0 means unlimited.
-	MaxInputTokens int64
+	MaxInputTokens  int64
+	MaxOutputTokens int64
+	MaxUSD          float64
 }
 
 // ErrBudgetExceeded is returned by LLMCall when the pre-call input-token

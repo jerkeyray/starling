@@ -70,12 +70,23 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	}
 	startWall := time.Now()
 
+	// Wall-clock budget: wrap the run's ctx with a deadline so blocking
+	// provider/tool calls unblock on expiry. DeadlineExceeded surfaces
+	// through LLMCall / CallTool unchanged; emitTerminal inspects
+	// a.Budget.MaxWallClock to decide between RunCancelled (external
+	// cancellation) and RunFailed{ErrorType:"budget"} (wall-clock trip).
+	if a.Budget != nil && a.Budget.MaxWallClock > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, startWall.Add(a.Budget.MaxWallClock))
+		defer cancel()
+	}
+
 	stepCfg := step.Config{
 		Log:      a.Log,
 		RunID:    runID,
 		Provider: a.Provider,
 		Tools:    step.NewRegistry(a.Tools...),
-		Budget:   step.BudgetConfig{MaxInputTokens: budgetInputCap(a.Budget)},
+		Budget:   budgetStepConfig(a.Budget),
 	}
 	if len(a.replayRecorded) > 0 {
 		stepCfg.Mode = step.ModeReplay
@@ -307,6 +318,37 @@ func (a *Agent) emitTerminal(ctx context.Context, sc *step.Context, runErr error
 			DurationMs:        durMs,
 			MerkleRoot:        root,
 		})
+	case errors.Is(runErr, context.DeadlineExceeded) && a.Budget != nil && a.Budget.MaxWallClock > 0:
+		// Wall-clock budget trip. Emit BudgetExceeded{wall_clock} so
+		// the log carries the trip detail (matches the mid_stream
+		// shape for the other axes), then RunFailed{ErrorType:"budget"}.
+		// Using durMs (already replay-stable) keeps live/replay
+		// byte-identical.
+		if err := stepEmit(ctx, sc, event.KindBudgetExceeded, event.BudgetExceeded{
+			Limit:  "wall_clock",
+			Cap:    float64(a.Budget.MaxWallClock.Milliseconds()),
+			Actual: float64(durMs),
+			Where:  "mid_stream",
+		}); err != nil {
+			return 0, fmt.Errorf("emit BudgetExceeded(wall_clock): %w", err)
+		}
+		// Re-read events so the Merkle root covers the BudgetExceeded
+		// we just emitted.
+		evs2, err := a.Log.Read(readCtx, sc.RunID())
+		if err != nil {
+			return 0, fmt.Errorf("read log: %w", err)
+		}
+		hashes2, err := merkle.EventHashes(evs2)
+		if err != nil {
+			return 0, fmt.Errorf("hash events: %w", err)
+		}
+		root = merkle.Root(hashes2)
+		return event.KindRunFailed, stepEmit(ctx, sc, event.KindRunFailed, event.RunFailed{
+			Error:      runErr.Error(),
+			ErrorType:  "budget",
+			MerkleRoot: root,
+			DurationMs: durMs,
+		})
 	case errors.Is(runErr, context.Canceled), errors.Is(runErr, context.DeadlineExceeded):
 		reason := "context_canceled"
 		if errors.Is(runErr, context.DeadlineExceeded) {
@@ -511,6 +553,20 @@ func budgetInputCap(b *Budget) int64 {
 		return 0
 	}
 	return b.MaxInputTokens
+}
+
+// budgetStepConfig projects the full Agent.Budget onto the step-level
+// BudgetConfig (input/output tokens + USD). Wall-clock is intentionally
+// omitted — it's enforced at the agent level via context.WithDeadline.
+func budgetStepConfig(b *Budget) step.BudgetConfig {
+	if b == nil {
+		return step.BudgetConfig{}
+	}
+	return step.BudgetConfig{
+		MaxInputTokens:  b.MaxInputTokens,
+		MaxOutputTokens: b.MaxOutputTokens,
+		MaxUSD:          b.MaxUSD,
+	}
 }
 
 func budgetLimits(b *Budget) *event.BudgetLimits {

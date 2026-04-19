@@ -212,6 +212,102 @@ func TestLLMCall_PreCallBudget(t *testing.T) {
 	}
 }
 
+func TestLLMCall_MidStream_OutputTokens(t *testing.T) {
+	usage := provider.UsageUpdate{InputTokens: 10, OutputTokens: 20}
+	chunks := []provider.StreamChunk{
+		{Kind: provider.ChunkText, Text: "partial answer"},
+		{Kind: provider.ChunkUsage, Usage: &usage},
+		// Provider would continue emitting; we should never get here.
+		{Kind: provider.ChunkText, Text: " SHOULD-NOT-APPEAR"},
+		{Kind: provider.ChunkEnd, StopReason: "stop"},
+	}
+	p := &fakeProvider{stream: &fakeStream{chunks: chunks}}
+	ctx, log := newLLMCtx(t, p, step.BudgetConfig{MaxOutputTokens: 5})
+
+	_, err := step.LLMCall(ctx, &provider.Request{Model: "gpt-4o-mini"})
+	if !errors.Is(err, step.ErrBudgetExceeded) {
+		t.Fatalf("err = %v, want ErrBudgetExceeded", err)
+	}
+	evs := readAll(t, log)
+	wantKinds := []event.Kind{event.KindTurnStarted, event.KindBudgetExceeded}
+	if len(evs) != len(wantKinds) {
+		t.Fatalf("len(events) = %d, want %d: %v", len(evs), len(wantKinds), evs)
+	}
+	for i, k := range wantKinds {
+		if evs[i].Kind != k {
+			t.Fatalf("kind[%d] = %s, want %s", i, evs[i].Kind, k)
+		}
+	}
+	be, err := evs[1].AsBudgetExceeded()
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if be.Limit != "output_tokens" {
+		t.Fatalf("Limit = %q", be.Limit)
+	}
+	if be.Where != "mid_stream" {
+		t.Fatalf("Where = %q", be.Where)
+	}
+	if be.Cap != 5 || be.Actual != 20 {
+		t.Fatalf("cap=%v actual=%v", be.Cap, be.Actual)
+	}
+	if be.PartialText != "partial answer" {
+		t.Fatalf("PartialText = %q", be.PartialText)
+	}
+	if be.PartialTokens != 20 {
+		t.Fatalf("PartialTokens = %d, want 20", be.PartialTokens)
+	}
+	if be.TurnID == "" {
+		t.Fatalf("TurnID empty")
+	}
+}
+
+func TestLLMCall_MidStream_USD(t *testing.T) {
+	// gpt-4o-mini: $0.15/$0.60 per Mtok. 1M out = $0.60. Cap $0.0001 trips.
+	usage := provider.UsageUpdate{InputTokens: 0, OutputTokens: 1_000_000}
+	chunks := []provider.StreamChunk{
+		{Kind: provider.ChunkUsage, Usage: &usage},
+		{Kind: provider.ChunkEnd, StopReason: "stop"},
+	}
+	p := &fakeProvider{stream: &fakeStream{chunks: chunks}}
+	ctx, log := newLLMCtx(t, p, step.BudgetConfig{MaxUSD: 0.0001})
+
+	_, err := step.LLMCall(ctx, &provider.Request{Model: "gpt-4o-mini"})
+	if !errors.Is(err, step.ErrBudgetExceeded) {
+		t.Fatalf("err = %v, want ErrBudgetExceeded", err)
+	}
+	evs := readAll(t, log)
+	if len(evs) != 2 || evs[1].Kind != event.KindBudgetExceeded {
+		t.Fatalf("events = %v", evs)
+	}
+	be, _ := evs[1].AsBudgetExceeded()
+	if be.Limit != "usd" {
+		t.Fatalf("Limit = %q", be.Limit)
+	}
+	if be.Where != "mid_stream" {
+		t.Fatalf("Where = %q", be.Where)
+	}
+	if be.Cap != 0.0001 || be.Actual <= be.Cap {
+		t.Fatalf("cap=%v actual=%v", be.Cap, be.Actual)
+	}
+}
+
+func TestLLMCall_MidStream_UnknownModelUSDSkipped(t *testing.T) {
+	// Unknown model → CostUSD returns 0, USD check silently skipped.
+	usage := provider.UsageUpdate{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+	chunks := []provider.StreamChunk{
+		{Kind: provider.ChunkUsage, Usage: &usage},
+		{Kind: provider.ChunkEnd, StopReason: "stop"},
+	}
+	p := &fakeProvider{stream: &fakeStream{chunks: chunks}}
+	ctx, _ := newLLMCtx(t, p, step.BudgetConfig{MaxUSD: 0.0001})
+
+	_, err := step.LLMCall(ctx, &provider.Request{Model: "mystery-model-x"})
+	if err != nil {
+		t.Fatalf("LLMCall: %v (expected success; unknown model skips USD check)", err)
+	}
+}
+
 func TestLLMCall_StreamError(t *testing.T) {
 	boom := errors.New("boom")
 	chunks := []provider.StreamChunk{

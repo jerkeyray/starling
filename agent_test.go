@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/event"
@@ -510,6 +511,129 @@ func TestAgent_AnthropicThinking_ReplayMatches(t *testing.T) {
 	p.i = 0
 	if err := starling.Replay(context.Background(), log, res.RunID, a); err != nil {
 		t.Fatalf("Replay: %v", err)
+	}
+}
+
+// TestAgent_Budget_OutputTokens_MidStream covers the step-layer
+// mid-stream trip: a usage chunk reporting 20 output tokens against a
+// cap of 5 emits BudgetExceeded{mid_stream,output_tokens} and
+// terminates the run as RunFailed{ErrorType:"budget"}. Replay of the
+// resulting log must be byte-identical.
+func TestAgent_Budget_OutputTokens_MidStream(t *testing.T) {
+	usage := provider.UsageUpdate{InputTokens: 5, OutputTokens: 20}
+	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+		{
+			{Kind: provider.ChunkText, Text: "partial"},
+			{Kind: provider.ChunkUsage, Usage: &usage},
+			{Kind: provider.ChunkEnd, StopReason: "stop"},
+		},
+	}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+
+	a := &starling.Agent{
+		Provider: p,
+		Log:      log,
+		Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
+		Budget:   &starling.Budget{MaxOutputTokens: 5},
+	}
+	res, err := a.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatalf("err = nil, want a budget error")
+	}
+	if res.TerminalKind != event.KindRunFailed {
+		t.Fatalf("TerminalKind = %s", res.TerminalKind)
+	}
+
+	evs, _ := log.Read(context.Background(), res.RunID)
+	want := []event.Kind{
+		event.KindRunStarted,
+		event.KindTurnStarted,
+		event.KindBudgetExceeded,
+		event.KindRunFailed,
+	}
+	if got := kindsOf(evs); !kindsEq(got, want) {
+		t.Fatalf("kinds = %v\n want %v", got, want)
+	}
+	be, _ := evs[2].AsBudgetExceeded()
+	if be.Limit != "output_tokens" || be.Where != "mid_stream" {
+		t.Fatalf("be = %+v", be)
+	}
+	rf, _ := evs[3].AsRunFailed()
+	if rf.ErrorType != "budget" {
+		t.Fatalf("RunFailed.ErrorType = %q", rf.ErrorType)
+	}
+	// Replay of mid-stream budget trips is deferred: the replay
+	// provider reconstructs streams from AssistantMessageCompleted,
+	// which a tripped turn never emits. Tracked separately.
+}
+
+// blockingStream blocks on Next until ctx cancels. Used for the
+// wall-clock budget test where the provider is "stuck" and the run
+// must unblock via the deadline.
+type blockingStream struct{}
+
+func (blockingStream) Next(ctx context.Context) (provider.StreamChunk, error) {
+	<-ctx.Done()
+	return provider.StreamChunk{}, ctx.Err()
+}
+func (blockingStream) Close() error { return nil }
+
+type blockingProvider struct{}
+
+func (blockingProvider) Info() provider.Info { return provider.Info{ID: "blocking", APIVersion: "v0"} }
+func (blockingProvider) Stream(_ context.Context, _ *provider.Request) (provider.EventStream, error) {
+	return blockingStream{}, nil
+}
+
+// TestAgent_Budget_WallClock verifies the agent-level deadline path:
+// a provider that blocks forever should unblock within the wall-clock
+// budget and terminate as RunFailed{budget} with a preceding
+// BudgetExceeded{wall_clock} event.
+func TestAgent_Budget_WallClock(t *testing.T) {
+	log := eventlog.NewInMemory()
+	defer log.Close()
+
+	a := &starling.Agent{
+		Provider: blockingProvider{},
+		Log:      log,
+		Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
+		Budget:   &starling.Budget{MaxWallClock: 50 * time.Millisecond},
+	}
+	start := time.Now()
+	res, err := a.Run(context.Background(), "wait")
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("elapsed = %v, want < 500ms (deadline should preempt the blocking stream)", elapsed)
+	}
+	if res.TerminalKind != event.KindRunFailed {
+		t.Fatalf("TerminalKind = %s, want RunFailed", res.TerminalKind)
+	}
+
+	evs, _ := log.Read(context.Background(), res.RunID)
+	// Find the BudgetExceeded immediately before RunFailed.
+	if len(evs) < 2 {
+		t.Fatalf("events too short: %v", kindsOf(evs))
+	}
+	last := evs[len(evs)-1]
+	penult := evs[len(evs)-2]
+	if last.Kind != event.KindRunFailed {
+		t.Fatalf("final kind = %s, want RunFailed", last.Kind)
+	}
+	if penult.Kind != event.KindBudgetExceeded {
+		t.Fatalf("penult kind = %s, want BudgetExceeded", penult.Kind)
+	}
+	be, _ := penult.AsBudgetExceeded()
+	if be.Limit != "wall_clock" {
+		t.Fatalf("Limit = %q, want wall_clock", be.Limit)
+	}
+	rf, _ := last.AsRunFailed()
+	if rf.ErrorType != "budget" {
+		t.Fatalf("RunFailed.ErrorType = %q, want budget", rf.ErrorType)
 	}
 }
 
