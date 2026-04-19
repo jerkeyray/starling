@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/jerkeyray/starling/tool"
 	"github.com/oklog/ulid/v2"
 	"github.com/zeebo/blake3"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Agent is the user-facing entry point. Construction is a plain
@@ -46,6 +48,17 @@ type Agent struct {
 	// Config carries model / system prompt / params / MaxTurns.
 	Config Config
 
+	// Namespace is an optional prefix for this agent's RunIDs, letting
+	// multiple tenants share one event log without colliding if they
+	// pick the same raw RunID. When non-empty, every event written by
+	// this agent carries RunID = Namespace + "/" + <ULID>, and all
+	// eventlog lookups (Read, Stream, Replay) must use the same prefixed
+	// form. Empty namespace preserves pre-M3 behavior exactly.
+	//
+	// Must not contain "/" (the reserved separator); validate() rejects
+	// this at Run time.
+	Namespace string
+
 	// replayRecorded, when non-nil, switches Run into replay mode:
 	// step.Context operates under ModeReplay, the RunID is pulled from
 	// the first recorded event rather than freshly minted, and every
@@ -68,9 +81,14 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 
 	var runID string
 	if len(a.replayRecorded) > 0 {
+		// Replay uses the recorded RunID verbatim — it already carries
+		// whatever namespace prefix the original run wrote.
 		runID = a.replayRecorded[0].RunID
 	} else {
 		runID = newULID()
+		if a.Namespace != "" {
+			runID = a.Namespace + "/" + runID
+		}
 	}
 	startWall := time.Now()
 
@@ -86,6 +104,11 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	}
 
 	logger := obs.Resolve(a.Config.Logger).With(obs.AttrRunID, runID)
+
+	// Open the root OTel span. The no-op tracer is zero cost when no
+	// SDK is wired up, so unconditional wrapping is safe.
+	ctx, runSpan := obs.StartRunSpan(ctx, runID)
+	defer runSpan.End()
 
 	stepCfg := step.Config{
 		Log:      a.Log,
@@ -132,8 +155,10 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	switch term {
 	case event.KindRunFailed:
 		logger.Error("run failed", append(termAttrs, "err", errString(runErr))...)
+		obs.SetSpanError(runSpan, runErr)
 	case event.KindRunCancelled:
 		logger.Info("run cancelled", termAttrs...)
+		obs.SetSpanError(runSpan, runErr)
 	default:
 		logger.Info("run completed", termAttrs...)
 	}
@@ -172,6 +197,8 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 
 		logger.Debug("turn start", "turn", turn)
 
+		turnCtx, turnSpan := obs.StartTurnSpan(ctx, "", turn)
+
 		req := &provider.Request{
 			Model:        a.Config.Model,
 			SystemPrompt: a.Config.SystemPrompt,
@@ -179,10 +206,15 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 			Tools:        toolDefs(a.Tools),
 			Params:       a.Config.Params,
 		}
-		resp, err := step.LLMCall(ctx, req)
+		resp, err := step.LLMCall(turnCtx, req)
 		if err != nil {
+			obs.SetSpanError(turnSpan, err)
+			turnSpan.End()
 			return err
 		}
+		// Late-bind the TurnID as a span attribute now that LLMCall has
+		// minted it. (OTel attributes are additive; earlier attrs stick.)
+		turnSpan.SetAttributes(turnIDAttr(resp.TurnID))
 
 		// Accumulate this assistant turn into history so the next
 		// LLMCall sees what it already said + planned.
@@ -194,6 +226,7 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 
 		// Terminal turn: no planned tool calls → return.
 		if len(resp.ToolUses) == 0 {
+			turnSpan.End()
 			return nil
 		}
 
@@ -203,13 +236,15 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 		// latency is max(tool_i) rather than sum(tool_i).
 		if len(resp.ToolUses) == 1 {
 			tu := resp.ToolUses[0]
-			result, cerr := step.CallTool(ctx, step.ToolCall{
+			result, cerr := step.CallTool(turnCtx, step.ToolCall{
 				CallID: tu.CallID,
 				TurnID: resp.TurnID,
 				Name:   tu.Name,
 				Args:   tu.Args,
 			})
 			if cerr != nil {
+				obs.SetSpanError(turnSpan, cerr)
+				turnSpan.End()
 				if errors.Is(cerr, context.Canceled) || errors.Is(cerr, context.DeadlineExceeded) {
 					return cerr
 				}
@@ -232,22 +267,28 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 					Args:   tu.Args,
 				}
 			}
-			results, cerr := step.CallTools(ctx, calls)
+			results, cerr := step.CallTools(turnCtx, calls)
 			if cerr != nil {
 				// Only dispatch-level errors (emit failures, replay
 				// mismatch) surface here. Per-tool errors live inside
 				// the returned results.
+				obs.SetSpanError(turnSpan, cerr)
+				turnSpan.End()
 				return cerr
 			}
 			// Check ctx first: if the run was cancelled mid-batch, a
 			// tool may have returned ctx.Err() — surface that as the
 			// terminal cause rather than a per-tool ToolError.
 			if err := ctx.Err(); err != nil {
+				obs.SetSpanError(turnSpan, err)
+				turnSpan.End()
 				return err
 			}
 			for i, res := range results {
 				tu := resp.ToolUses[i]
 				if res.Err != nil {
+					obs.SetSpanError(turnSpan, res.Err)
+					turnSpan.End()
 					if errors.Is(res.Err, context.Canceled) || errors.Is(res.Err, context.DeadlineExceeded) {
 						return res.Err
 					}
@@ -262,9 +303,16 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 				})
 			}
 		}
+		turnSpan.End()
 	}
 
 	return ErrMaxTurnsExceeded
+}
+
+// turnIDAttr returns the KeyValue attribute for a turn's ID, imported
+// locally so agent.go doesn't pull OTel directly elsewhere.
+func turnIDAttr(turnID string) attribute.KeyValue {
+	return attribute.String(obs.AttrTurnID, turnID)
 }
 
 // emitRunStarted snapshots all the run-start metadata into a
@@ -492,6 +540,9 @@ func (a *Agent) validate() error {
 	}
 	if a.Config.Model == "" {
 		return fmt.Errorf("starling: Agent.Config.Model is empty")
+	}
+	if strings.ContainsRune(a.Namespace, '/') {
+		return fmt.Errorf("starling: Agent.Namespace must not contain '/' (reserved separator); got %q", a.Namespace)
 	}
 	// Tool name uniqueness — silent duplicates would clobber each
 	// other inside step.Registry, which is a sharp foot-gun.

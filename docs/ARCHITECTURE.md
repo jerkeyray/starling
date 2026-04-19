@@ -233,6 +233,88 @@ Replay produces a `RunResult` identical to the original (in state-faithful mode)
 - **EventLog implementations handle their own concurrency.** `log.Memory` uses `sync.RWMutex`; SQLite uses WAL mode + busy-timeout; Postgres uses per-row locking on `(run_id, seq)`.
 - **Budget watchdog**: a single goroutine per streaming LLM call. Consumes `StreamChunk`s, updates local token counter, calls `cancel()` when budget trips. Joined on stream close.
 
+### 6.1 Multi-tenant layout
+
+The SQLite backend keys events on `(run_id, seq)` with no separate
+tenant column. Two tenants picking the same raw RunID would collide.
+The `Agent.Namespace` field (added in M3) sidesteps this without a
+schema change: when set, every event written by that agent carries
+`RunID = Namespace + "/" + ULID`, and all lookups use the prefixed
+form. One SQLite file can host many tenants safely as long as each
+agent is constructed with a distinct `Namespace`. Empty namespace
+preserves pre-M3 behavior.
+
+### 6.2 Performance / backpressure
+
+Event appends are **synchronous**. `step.emit` blocks until the log
+backend returns:
+
+- `eventlog.Memory` — in-memory append + fan-out to stream
+  subscribers; effectively non-blocking.
+- `eventlog.SQLite` — `BEGIN IMMEDIATE` + single-row INSERT +
+  `COMMIT`. Under WAL mode this is sub-millisecond on healthy local
+  disk, but a slow or contended disk stalls the emitting goroutine,
+  which in turn stalls the agent turn that called `step.Now` / tool
+  dispatch / `step.LLMCall`.
+
+This is a deliberate tradeoff: the core audit-trail guarantee is
+"emit returned nil means the event is on disk." An async write
+buffer would weaken that guarantee (buffered events lost on crash),
+so none is shipped by default.
+
+Practical implications:
+
+- Tune for fast local storage. Network filesystems (NFS, EFS)
+  behave poorly under WAL mode.
+- If the log write itself fails, `step.Now` / `step.Random` panic
+  with a `non-replayable` message rather than silently continuing
+  with a broken hash chain.
+- A long-running agent on a slow disk is detectable via OTel span
+  durations — `agent.turn` latency that exceeds LLM+tool latency by
+  much is a disk-stall signal.
+
+Future work: an opt-in bounded write buffer (drops the
+write-through guarantee for throughput) is a follow-up, not a
+default.
+
+---
+
+## 6.3 Observability
+
+Three independent layers, pick whichever subset you need:
+
+1. **Event log** — the source of truth. Every emission lands as a
+   typed `event.Event` with `(RunID, Seq, PrevHash, Timestamp, Kind,
+   Payload)`. This is the audit trail; nothing else here can replace
+   it. Read it via `EventLog.Read(ctx, runID)` after the run, or
+   stream via `EventLog.Stream(ctx, runID)` while the run is live.
+
+2. **`log/slog`** — structured side-channel trace. Set
+   `Agent.Config.Logger`; every record carries `run_id`, plus
+   `turn_id` / `call_id` / `attempt` where relevant. Levels:
+   - `Debug` — turn boundaries.
+   - `Info` — `run started`, `run completed`, `run cancelled`.
+   - `Warn` — budget trips, transient tool retries.
+   - `Error` — `run failed` (terminal).
+
+   Defaults to `slog.Default()` when nil; pass an `io.Discard`-backed
+   handler to silence library output entirely.
+
+3. **OpenTelemetry** — distributed-trace integration. The library
+   uses the global `otel.Tracer` provider; without an SDK configured
+   you pay only the no-op tracer indirection. Span tree:
+
+   ```
+   agent.run
+   └── agent.turn
+       ├── agent.llm_call
+       └── agent.tool_call (one per attempt; retries add Attempt attr)
+   ```
+
+   Span errors mirror the terminal event kind. Use OTel for "what
+   takes the time?" investigations; use slog for "what happened
+   when?"; use the event log for "what *exactly* happened?"
+
 ---
 
 ## 7. Error handling

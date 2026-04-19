@@ -35,7 +35,7 @@ import (
 //
 // Panics if ctx has no step.Context attached, or if the Context was
 // built without a Provider.
-func LLMCall(ctx context.Context, req *provider.Request) (*provider.Response, error) {
+func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Response, err error) {
 	c := mustFrom(ctx, "LLMCall")
 	p := c.prov()
 	if p == nil {
@@ -44,6 +44,16 @@ func LLMCall(ctx context.Context, req *provider.Request) (*provider.Response, er
 	if req == nil {
 		return nil, fmt.Errorf("step.LLMCall: req is nil")
 	}
+
+	// OTel span. No-op tracer when no SDK is configured; ctx is updated
+	// so downstream tool spans become children of this one.
+	ctx, span := obs.StartLLMSpan(ctx, req.Model)
+	defer func() {
+		if err != nil {
+			obs.SetSpanError(span, err)
+		}
+		span.End()
+	}()
 
 	// 1. Pre-call budget check.
 	est := estimateRequestTokens(req)

@@ -637,6 +637,55 @@ func TestAgent_Budget_WallClock(t *testing.T) {
 	}
 }
 
+// ---- namespace -----------------------------------------------------------
+
+func TestAgent_Namespace_PrefixesRunID(t *testing.T) {
+	p := &cannedProvider{scripts: [][]provider.StreamChunk{{
+		{Kind: provider.ChunkText, Text: "ok"},
+		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+		{Kind: provider.ChunkEnd, StopReason: "stop"},
+	}}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+
+	a := &starling.Agent{
+		Provider:  p,
+		Log:       log,
+		Namespace: "tenantA",
+		Config:    starling.Config{Model: "m", MaxTurns: 2},
+	}
+	res, err := a.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if want := "tenantA/"; len(res.RunID) < len(want) || res.RunID[:len(want)] != want {
+		t.Fatalf("RunID = %q, want prefix %q", res.RunID, want)
+	}
+	// Log is keyed on the prefixed RunID.
+	evs, _ := log.Read(context.Background(), res.RunID)
+	if len(evs) == 0 {
+		t.Fatalf("no events under prefixed RunID")
+	}
+	if evs[0].RunID != res.RunID {
+		t.Fatalf("event RunID = %q, want %q", evs[0].RunID, res.RunID)
+	}
+}
+
+func TestAgent_Namespace_RejectsSlash(t *testing.T) {
+	p := &cannedProvider{}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+	a := &starling.Agent{
+		Provider:  p,
+		Log:       log,
+		Namespace: "a/b",
+		Config:    starling.Config{Model: "m"},
+	}
+	if _, err := a.Run(context.Background(), "x"); err == nil {
+		t.Fatal("want error for namespace containing '/'")
+	}
+}
+
 // ---- tiny helpers --------------------------------------------------------
 
 func kindsEq(a, b []event.Kind) bool {

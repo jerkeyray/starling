@@ -28,13 +28,17 @@ type ReadFileOutput struct {
 // baseDir — attempts to escape via "..", absolute paths, or symlinks are
 // rejected). Contents are capped at 1 MiB.
 //
+// Returns an error if baseDir cannot be resolved to an absolute path;
+// an invalid baseDir is a caller (user) bug, not a programmer bug, so
+// the error is surfaced rather than panicked.
+//
 // Note: this deviates from the zero-arg signature sketched in API.md §5.1.
 // A caller-supplied base directory is the only way to bound file access
 // safely; defaulting to "." would silently expose the process's cwd.
-func ReadFile(baseDir string) tool.Tool {
+func ReadFile(baseDir string) (tool.Tool, error) {
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
-		panic(fmt.Sprintf("builtin.ReadFile: resolve base dir %q: %v", baseDir, err))
+		return nil, fmt.Errorf("builtin.ReadFile: resolve base dir %q: %w", baseDir, err)
 	}
 	// Also resolve symlinks on the base so that containment checks on a
 	// resolved target compare like-to-like (macOS /tmp -> /private/tmp is
@@ -86,7 +90,7 @@ func ReadFile(baseDir string) tool.Tool {
 			}
 			return ReadFileOutput{Contents: string(b)}, nil
 		},
-	)
+	), nil
 }
 
 // withinBase reports whether target is base itself or lives inside it.

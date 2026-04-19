@@ -268,6 +268,10 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 	}
 
 	for attempt := 1; attempt <= attempts; attempt++ {
+		// One OTel span per attempt. Ends before the loop iteration
+		// finishes (success, failure, or falls through to retry).
+		attemptCtx, attemptSpan := obs.StartToolSpan(ctx, call.Name, call.CallID, attempt)
+
 		// Attempt-1 Scheduled is emitted by the caller (CallTool /
 		// CallTools). For retries we emit a fresh Scheduled before the
 		// call so the log carries one Scheduled per attempt.
@@ -278,6 +282,8 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			}
 			argsCBOR, err := jsonToCanonicalCBOR(argsRaw)
 			if err != nil {
+				obs.SetSpanError(attemptSpan, err)
+				attemptSpan.End()
 				return nil, fmt.Errorf("step.CallTool(%q): encode args: %w", call.Name, err)
 			}
 			if err := emit(ctx, c, event.KindToolCallScheduled, event.ToolCallScheduled{
@@ -287,22 +293,28 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 				Args:     argsCBOR,
 				Attempt:  uint32(attempt),
 			}); err != nil {
+				obs.SetSpanError(attemptSpan, err)
+				attemptSpan.End()
 				return nil, fmt.Errorf("step.CallTool(%q): emit Scheduled: %w", call.Name, err)
 			}
 		}
 
 		reg := c.registry()
 		if reg == nil {
+			obs.SetSpanError(attemptSpan, ErrToolNotFound)
+			attemptSpan.End()
 			return nil, emitToolFailed(ctx, c, call.CallID, ErrToolNotFound, "tool", 0, uint32(attempt))
 		}
 		tl, ok := reg.Get(call.Name)
 		if !ok {
 			wrapped := fmt.Errorf("%w: %s", ErrToolNotFound, call.Name)
+			obs.SetSpanError(attemptSpan, wrapped)
+			attemptSpan.End()
 			return nil, emitToolFailed(ctx, c, call.CallID, wrapped, "tool", 0, uint32(attempt))
 		}
 
 		start := time.Now()
-		result, execErr := runToolSafely(ctx, tl, call.Args)
+		result, execErr := runToolSafely(attemptCtx, tl, call.Args)
 		durMs := ReplayDurationMs(ctx, time.Since(start).Milliseconds())
 
 		if execErr == nil {
@@ -312,6 +324,8 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			}
 			resultCBOR, cerr := jsonToCanonicalCBOR(resultRaw)
 			if cerr != nil {
+				obs.SetSpanError(attemptSpan, cerr)
+				attemptSpan.End()
 				return result, fmt.Errorf("step.CallTool(%q): encode result: %w", call.Name, cerr)
 			}
 			if err := emit(ctx, c, event.KindToolCallCompleted, event.ToolCallCompleted{
@@ -320,12 +334,16 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 				DurationMs: durMs,
 				Attempt:    uint32(attempt),
 			}); err != nil {
+				obs.SetSpanError(attemptSpan, err)
+				attemptSpan.End()
 				return result, fmt.Errorf("step.CallTool(%q): emit Completed: %w", call.Name, err)
 			}
+			attemptSpan.End()
 			return result, nil
 		}
 
 		errType := classifyToolError(ctx, execErr)
+		obs.SetSpanError(attemptSpan, execErr)
 
 		// Terminal iff we can't retry. ctx errors (incl. cancellation
 		// and deadline) are never retried; ErrToolNotFound never is;
@@ -335,6 +353,7 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			!errors.Is(execErr, ErrToolNotFound) &&
 			ctx.Err() == nil
 		if !retryable || attempt == attempts {
+			attemptSpan.End()
 			return nil, emitToolFailed(ctx, c, call.CallID, execErr, errType, durMs, uint32(attempt))
 		}
 
@@ -348,8 +367,10 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			DurationMs: durMs,
 			Attempt:    uint32(attempt),
 		}); emitErr != nil {
+			attemptSpan.End()
 			return nil, errors.Join(fmt.Errorf("step.CallTool: emit Failed: %w", emitErr), execErr)
 		}
+		attemptSpan.End()
 		c.logger.Warn("tool transient failure, retrying",
 			obs.AttrToolName, call.Name,
 			obs.AttrCallID, call.CallID,

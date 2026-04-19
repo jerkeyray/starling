@@ -16,7 +16,7 @@ func TestReadFile_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tl := ReadFile(dir)
+	tl, _ := ReadFile(dir)
 	in, _ := json.Marshal(ReadFileInput{Path: "hello.txt"})
 	out, err := tl.Execute(context.Background(), in)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestReadFile_Success(t *testing.T) {
 
 func TestReadFile_EscapesBaseDir(t *testing.T) {
 	dir := t.TempDir()
-	tl := ReadFile(dir)
+	tl, _ := ReadFile(dir)
 	in, _ := json.Marshal(ReadFileInput{Path: "../../../etc/passwd"})
 	_, err := tl.Execute(context.Background(), in)
 	if err == nil {
@@ -41,7 +41,7 @@ func TestReadFile_EscapesBaseDir(t *testing.T) {
 
 func TestReadFile_AbsolutePathRejected(t *testing.T) {
 	dir := t.TempDir()
-	tl := ReadFile(dir)
+	tl, _ := ReadFile(dir)
 	in, _ := json.Marshal(ReadFileInput{Path: "/etc/passwd"})
 	_, err := tl.Execute(context.Background(), in)
 	if err == nil {
@@ -64,7 +64,7 @@ func TestReadFile_SymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tl := ReadFile(base)
+	tl, _ := ReadFile(base)
 	in, _ := json.Marshal(ReadFileInput{Path: "link"})
 	_, err := tl.Execute(context.Background(), in)
 	if err == nil {
@@ -74,7 +74,7 @@ func TestReadFile_SymlinkEscape(t *testing.T) {
 
 func TestReadFile_Nonexistent(t *testing.T) {
 	dir := t.TempDir()
-	tl := ReadFile(dir)
+	tl, _ := ReadFile(dir)
 	in, _ := json.Marshal(ReadFileInput{Path: "nope.txt"})
 	_, err := tl.Execute(context.Background(), in)
 	if err == nil {
@@ -84,7 +84,7 @@ func TestReadFile_Nonexistent(t *testing.T) {
 
 func TestReadFile_MissingPath(t *testing.T) {
 	dir := t.TempDir()
-	tl := ReadFile(dir)
+	tl, _ := ReadFile(dir)
 	_, err := tl.Execute(context.Background(), json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatalf("expected error for missing path")

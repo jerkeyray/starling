@@ -211,6 +211,22 @@ Replay & budgets:
 - All four budget axes: input tokens, output tokens, USD, wall-clock
 - Per-model USD cost lookup
 
+Observability & multi-tenant:
+- `Config.Logger *slog.Logger` for structured side-channel trace
+- OpenTelemetry spans (`agent.run` → `agent.turn` → `agent.llm_call`
+  / `agent.tool_call`); no-op when no SDK is wired
+- `Agent.Namespace` prefixes RunIDs so one event log can host many
+  tenants safely
+
+## Observability
+
+Three layers, mix and match: the **event log** (audit trail),
+**`log/slog`** (live trace via `Config.Logger`), and **OpenTelemetry**
+spans around every step boundary (no-op tracer when no SDK is
+configured). See
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §6.3 for the full
+picture and §6.2 for the synchronous-write / backpressure contract.
+
 ## Docs
 
 - [`docs/API.md`](./docs/API.md) — public API reference

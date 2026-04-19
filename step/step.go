@@ -48,7 +48,12 @@ func Now(ctx context.Context) time.Time {
 		Name:  ndetNameNow,
 		Value: mustEncode(t.UnixNano()),
 	}); err != nil {
-		panic(fmt.Sprintf("step.Now: emit: %v", err))
+		// The event log rejected a SideEffectRecorded write. The run's
+		// hash chain is now incomplete, so any further work would
+		// produce a non-replayable trace — fail loudly so operators
+		// see the underlying log-backend fault instead of silently
+		// continuing into corruption.
+		panic(fmt.Sprintf("step.Now: event log rejected SideEffectRecorded write (run is now non-replayable): %v", err))
 	}
 	return t
 }
@@ -74,7 +79,10 @@ func Random(ctx context.Context) uint64 {
 		Name:  ndetNameRand,
 		Value: mustEncode(v),
 	}); err != nil {
-		panic(fmt.Sprintf("step.Random: emit: %v", err))
+		// See step.Now for rationale: the log rejected our write, so
+		// the run is now un-replayable; a panic surfaces the
+		// log-backend fault rather than masking it.
+		panic(fmt.Sprintf("step.Random: event log rejected SideEffectRecorded write (run is now non-replayable): %v", err))
 	}
 	return v
 }
