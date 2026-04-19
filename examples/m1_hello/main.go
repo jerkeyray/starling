@@ -1,13 +1,16 @@
 // Command m1_hello is the M1 end-to-end smoke demo. It builds an Agent
-// with one tool (current_time), points it at an OpenAI-compatible
-// endpoint, and prints the resulting RunResult plus a one-line dump of
-// the event log.
+// with one tool (current_time), points it at an LLM provider, and
+// prints the resulting RunResult plus a one-line dump of the event log.
 //
-// Usage:
+// Usage (OpenAI default):
 //
 //	OPENAI_API_KEY=sk-... go run ./examples/m1_hello
 //
-// Groq variant (same binary, different env):
+// Anthropic variant:
+//
+//	PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... go run ./examples/m1_hello
+//
+// Groq variant (OpenAI-compatible, same binary):
 //
 //	OPENAI_API_KEY=$GROQ_API_KEY \
 //	OPENAI_BASE_URL=https://api.groq.com/openai/v1 \
@@ -25,6 +28,8 @@ import (
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
+	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/provider/anthropic"
 	"github.com/jerkeyray/starling/provider/openai"
 	"github.com/jerkeyray/starling/tool"
 )
@@ -52,24 +57,51 @@ func main() {
 	}
 }
 
-func run() error {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY not set")
-	}
-	model := os.Getenv("MODEL")
-	if model == "" {
-		model = "gpt-4o-mini"
-	}
-	baseURL := os.Getenv("OPENAI_BASE_URL") // empty = default OpenAI
+// buildProvider picks between OpenAI (default) and Anthropic based on
+// the PROVIDER env var. Each branch honours its own MODEL env with a
+// sensible default.
+func buildProvider() (provider.Provider, string, error) {
+	switch os.Getenv("PROVIDER") {
+	case "anthropic":
+		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		if apiKey == "" {
+			return nil, "", fmt.Errorf("ANTHROPIC_API_KEY not set")
+		}
+		model := os.Getenv("MODEL")
+		if model == "" {
+			model = "claude-sonnet-4-6"
+		}
+		prov, err := anthropic.New(anthropic.WithAPIKey(apiKey))
+		if err != nil {
+			return nil, "", fmt.Errorf("anthropic.New: %w", err)
+		}
+		return prov, model, nil
 
-	provOpts := []openai.Option{openai.WithAPIKey(apiKey)}
-	if baseURL != "" {
-		provOpts = append(provOpts, openai.WithBaseURL(baseURL))
+	default: // "openai" or empty
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			return nil, "", fmt.Errorf("OPENAI_API_KEY not set")
+		}
+		model := os.Getenv("MODEL")
+		if model == "" {
+			model = "gpt-4o-mini"
+		}
+		opts := []openai.Option{openai.WithAPIKey(apiKey)}
+		if u := os.Getenv("OPENAI_BASE_URL"); u != "" {
+			opts = append(opts, openai.WithBaseURL(u))
+		}
+		prov, err := openai.New(opts...)
+		if err != nil {
+			return nil, "", fmt.Errorf("openai.New: %w", err)
+		}
+		return prov, model, nil
 	}
-	prov, err := openai.New(provOpts...)
+}
+
+func run() error {
+	prov, model, err := buildProvider()
 	if err != nil {
-		return fmt.Errorf("openai.New: %w", err)
+		return err
 	}
 
 	log := eventlog.NewInMemory()

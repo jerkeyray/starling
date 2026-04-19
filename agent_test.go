@@ -435,6 +435,84 @@ func TestAgent_ParallelToolDispatch_ReplayMatches(t *testing.T) {
 	}
 }
 
+// TestAgent_AnthropicThinking_ReplayMatches exercises the
+// extended-thinking flow a real Anthropic response produces: streaming
+// reasoning text deltas, a terminal signature chunk, then the final
+// assistant text. Live run emits one ReasoningEmitted with both
+// Content and Signature populated, and Replay reproduces the log
+// byte-for-byte.
+func TestAgent_AnthropicThinking_ReplayMatches(t *testing.T) {
+	sig := []byte("sig-bytes-v1")
+	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+		{
+			// Two thinking deltas accumulate.
+			{Kind: provider.ChunkReasoning, Text: "let me think "},
+			{Kind: provider.ChunkReasoning, Text: "about this..."},
+			// Terminal signature flushes the buffered reasoning.
+			{Kind: provider.ChunkReasoning, Signature: sig},
+			// Final assistant text.
+			{Kind: provider.ChunkText, Text: "the answer is 42"},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 8, OutputTokens: 6}},
+			{Kind: provider.ChunkEnd, StopReason: "end_turn"},
+		},
+	}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+
+	a := &starling.Agent{
+		Provider: p,
+		Log:      log,
+		Config:   starling.Config{Model: "claude-sonnet-4-6", MaxTurns: 2},
+	}
+	res, err := a.Run(context.Background(), "think hard")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.TerminalKind != event.KindRunCompleted {
+		t.Fatalf("TerminalKind = %s", res.TerminalKind)
+	}
+	if res.FinalText != "the answer is 42" {
+		t.Fatalf("FinalText = %q", res.FinalText)
+	}
+
+	evs, err := log.Read(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+
+	// Exactly one ReasoningEmitted; Content = concatenated deltas;
+	// Signature = captured sig bytes.
+	var reCount int
+	for _, ev := range evs {
+		if ev.Kind != event.KindReasoningEmitted {
+			continue
+		}
+		reCount++
+		re, err := ev.AsReasoningEmitted()
+		if err != nil {
+			t.Fatalf("decode ReasoningEmitted: %v", err)
+		}
+		if re.Content != "let me think about this..." {
+			t.Fatalf("ReasoningEmitted.Content = %q", re.Content)
+		}
+		if string(re.Signature) != string(sig) {
+			t.Fatalf("ReasoningEmitted.Signature = %q, want %q", re.Signature, sig)
+		}
+		if re.Redacted {
+			t.Fatalf("ReasoningEmitted.Redacted = true, want false")
+		}
+	}
+	if reCount != 1 {
+		t.Fatalf("ReasoningEmitted count = %d, want 1", reCount)
+	}
+
+	// Reset the provider and replay: must be byte-identical.
+	p.i = 0
+	if err := starling.Replay(context.Background(), log, res.RunID, a); err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+}
+
 // ---- tiny helpers --------------------------------------------------------
 
 func kindsEq(a, b []event.Kind) bool {

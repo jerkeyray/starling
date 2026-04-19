@@ -334,6 +334,109 @@ func TestConvertMessage_ToolWithError(t *testing.T) {
 	}
 }
 
+// captureServer runs a canned SSE script and returns the raw request
+// body the client POSTed. Exactly one request is recorded.
+func captureServer(t *testing.T, events []sseEvent) (*httptest.Server, *[]byte) {
+	t.Helper()
+	var captured []byte
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		captured = body
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		for _, ev := range events {
+			fmt.Fprintf(w, "data: %s\n\n", ev.Data)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	})
+	srv := httptest.NewServer(h)
+	return srv, &captured
+}
+
+// TestStream_RequestFieldsRoundTrip verifies that the widened Request
+// fields (ToolChoice, StopSequences, MaxOutputTokens) land on the wire
+// as the OpenAI API expects. Regression for T19 Day 1.
+func TestStream_RequestFieldsRoundTrip(t *testing.T) {
+	baseEvents := []sseEvent{
+		{Data: textChunk("c1", "ok")},
+		{Data: finishChunk("c1", "stop")},
+		{Data: usageChunk("c1", 1, 1, 0)},
+	}
+
+	// Helper runs one request and returns the decoded JSON body.
+	run := func(req *provider.Request) map[string]any {
+		srv, captured := captureServer(t, baseEvents)
+		defer srv.Close()
+		p := newTestProvider(t, srv.URL)
+		stream, err := p.Stream(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		defer stream.Close()
+		_ = drain(t, stream)
+		var body map[string]any
+		if err := json.Unmarshal(*captured, &body); err != nil {
+			t.Fatalf("unmarshal captured body: %v", err)
+		}
+		return body
+	}
+
+	t.Run("ToolChoiceAuto", func(t *testing.T) {
+		body := run(&provider.Request{Model: "test", ToolChoice: "auto"})
+		if body["tool_choice"] != "auto" {
+			t.Fatalf("tool_choice = %v, want auto", body["tool_choice"])
+		}
+	})
+
+	t.Run("ToolChoiceAnyMapsToRequired", func(t *testing.T) {
+		body := run(&provider.Request{Model: "test", ToolChoice: "any"})
+		if body["tool_choice"] != "required" {
+			t.Fatalf("tool_choice = %v, want required (portability shim for any)", body["tool_choice"])
+		}
+	})
+
+	t.Run("ToolChoiceNone", func(t *testing.T) {
+		body := run(&provider.Request{Model: "test", ToolChoice: "none"})
+		if body["tool_choice"] != "none" {
+			t.Fatalf("tool_choice = %v, want none", body["tool_choice"])
+		}
+	})
+
+	t.Run("StopSequencesArray", func(t *testing.T) {
+		body := run(&provider.Request{Model: "test", StopSequences: []string{"X", "Y"}})
+		stop, ok := body["stop"].([]any)
+		if !ok {
+			t.Fatalf("stop = %v (%T), want []any", body["stop"], body["stop"])
+		}
+		if len(stop) != 2 || stop[0] != "X" || stop[1] != "Y" {
+			t.Fatalf("stop = %v, want [X Y]", stop)
+		}
+	})
+
+	t.Run("StopSequencesSingleCollapses", func(t *testing.T) {
+		body := run(&provider.Request{Model: "test", StopSequences: []string{"HALT"}})
+		if body["stop"] != "HALT" {
+			t.Fatalf("stop = %v (%T), want string HALT", body["stop"], body["stop"])
+		}
+	})
+
+	t.Run("MaxOutputTokens", func(t *testing.T) {
+		body := run(&provider.Request{Model: "test", MaxOutputTokens: 128})
+		// JSON numbers unmarshal as float64 into map[string]any.
+		n, ok := body["max_completion_tokens"].(float64)
+		if !ok || n != 128 {
+			t.Fatalf("max_completion_tokens = %v (%T), want 128", body["max_completion_tokens"], body["max_completion_tokens"])
+		}
+	})
+}
+
 // Unused import guard so test file doesn't drop oai if the underlying
 // exported types shift. Keeps future refactors honest.
 var _ oai.ChatCompletionChunk

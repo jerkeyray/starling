@@ -20,10 +20,26 @@ type price struct {
 // CostUSD — so a missing entry never blocks a run, it just reports $0
 // and logs one warning per model.
 var prices = map[string]price{
-	"gpt-4o":       {InPerMtok: 2.50, OutPerMtok: 10.00},
-	"gpt-4o-mini":  {InPerMtok: 0.15, OutPerMtok: 0.60},
-	"gpt-4-turbo":  {InPerMtok: 10.00, OutPerMtok: 30.00},
+	"gpt-4o":        {InPerMtok: 2.50, OutPerMtok: 10.00},
+	"gpt-4o-mini":   {InPerMtok: 0.15, OutPerMtok: 0.60},
+	"gpt-4-turbo":   {InPerMtok: 10.00, OutPerMtok: 30.00},
 	"gpt-3.5-turbo": {InPerMtok: 0.50, OutPerMtok: 1.50},
+
+	// Anthropic Claude — USD per million tokens, sourced from
+	// platform.claude.com/docs/en/about-claude/pricing. Prompt-caching
+	// read/write multipliers are applied at the usage layer; these
+	// entries reflect base input/output only.
+	"claude-opus-4-7":   {InPerMtok: 5.00, OutPerMtok: 25.00},
+	"claude-opus-4-6":   {InPerMtok: 5.00, OutPerMtok: 25.00},
+	"claude-opus-4-5":   {InPerMtok: 5.00, OutPerMtok: 25.00},
+	"claude-opus-4-1":   {InPerMtok: 15.00, OutPerMtok: 75.00},
+	"claude-opus-4-0":   {InPerMtok: 15.00, OutPerMtok: 75.00},
+	"claude-sonnet-4-6": {InPerMtok: 3.00, OutPerMtok: 15.00},
+	"claude-sonnet-4-5": {InPerMtok: 3.00, OutPerMtok: 15.00},
+	"claude-sonnet-4-0": {InPerMtok: 3.00, OutPerMtok: 15.00},
+	"claude-haiku-4-5":  {InPerMtok: 1.00, OutPerMtok: 5.00},
+	"claude-haiku-3-5":  {InPerMtok: 0.80, OutPerMtok: 4.00},
+	"claude-haiku-3":    {InPerMtok: 0.25, OutPerMtok: 1.25},
 }
 
 var (

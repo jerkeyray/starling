@@ -77,6 +77,23 @@ prov, _ := openai.New(
 Same pattern works for Together, OpenRouter, Ollama, vLLM, LM Studio,
 Azure OpenAI.
 
+## Anthropic
+
+The Anthropic provider speaks the Messages API directly, including
+extended-thinking with signature replay, redacted-thinking blocks,
+and per-message prompt caching via `Message.Annotations`:
+
+```go
+import "github.com/jerkeyray/starling/provider/anthropic"
+
+prov, _ := anthropic.New(anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
+// Model: "claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5", ...
+```
+
+See [`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md) for the
+full feature matrix (what's supported, what's deferred) across both
+providers.
+
 ## What's in M1
 
 - `Agent` + ReAct loop with `MaxTurns` cap

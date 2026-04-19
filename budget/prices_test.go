@@ -18,6 +18,29 @@ func TestCostUSD_Known(t *testing.T) {
 	}
 }
 
+func TestCostUSD_Claude(t *testing.T) {
+	cases := []struct {
+		model              string
+		wantIn, wantOut    float64
+	}{
+		{"claude-opus-4-7", 5.00, 25.00},
+		{"claude-sonnet-4-6", 3.00, 15.00},
+		{"claude-haiku-4-5", 1.00, 5.00},
+		{"claude-haiku-3", 0.25, 1.25},
+	}
+	for _, tc := range cases {
+		// 1M in + 1M out => wantIn + wantOut dollars
+		got, ok := CostUSD(tc.model, 1_000_000, 1_000_000)
+		if !ok {
+			t.Fatalf("%s: ok=false, want true", tc.model)
+		}
+		want := tc.wantIn + tc.wantOut
+		if math.Abs(got-want) > 1e-9 {
+			t.Fatalf("%s: CostUSD = %v, want %v", tc.model, got, want)
+		}
+	}
+}
+
 func TestCostUSD_Unknown(t *testing.T) {
 	got, ok := CostUSD("mystery-model-x", 1000, 1000)
 	if ok {
