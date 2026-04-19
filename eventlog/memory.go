@@ -50,7 +50,11 @@ func (m *memoryLog) Append(ctx context.Context, runID string, ev event.Event) er
 		m.runs[runID] = rs
 	}
 
-	if err := validateAppend(rs.events, ev); err != nil {
+	var last *event.Event
+	if n := len(rs.events); n > 0 {
+		last = &rs.events[n-1]
+	}
+	if err := validateAppend(last, ev); err != nil {
 		return err
 	}
 
@@ -71,8 +75,12 @@ func (m *memoryLog) Append(ctx context.Context, runID string, ev event.Event) er
 	return nil
 }
 
-func validateAppend(prev []event.Event, ev event.Event) error {
-	if len(prev) == 0 {
+// validateAppend checks that ev is a valid next event after last.
+// A nil last means ev must be the first event of a run. Shared
+// between the in-memory and SQLite backends so both enforce identical
+// chain invariants.
+func validateAppend(last *event.Event, ev event.Event) error {
+	if last == nil {
 		if ev.Seq != 1 {
 			return fmt.Errorf("%w: first event must have Seq=1, got %d", ErrInvalidAppend, ev.Seq)
 		}
@@ -82,12 +90,11 @@ func validateAppend(prev []event.Event, ev event.Event) error {
 		return nil
 	}
 
-	last := prev[len(prev)-1]
 	if ev.Seq != last.Seq+1 {
 		return fmt.Errorf("%w: expected Seq=%d, got %d", ErrInvalidAppend, last.Seq+1, ev.Seq)
 	}
 
-	lastBytes, err := event.Marshal(last)
+	lastBytes, err := event.Marshal(*last)
 	if err != nil {
 		return fmt.Errorf("%w: re-marshal previous event: %v", ErrInvalidAppend, err)
 	}
