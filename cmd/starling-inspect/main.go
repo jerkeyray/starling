@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/jerkeyray/starling/eventlog"
+	"github.com/jerkeyray/starling/inspect"
 )
 
 func main() {
@@ -66,14 +67,10 @@ func run(args []string) error {
 	}
 	defer store.Close()
 
-	lister, ok := store.(eventlog.RunLister)
-	if !ok {
-		// Should be impossible: the SQLite backend satisfies RunLister
-		// today. Guard anyway so a future backend swap can't surprise us.
-		return errors.New("backend does not implement eventlog.RunLister")
+	srv, err := inspect.New(store)
+	if err != nil {
+		return fmt.Errorf("inspect: %w", err)
 	}
-
-	srv := newServer(store, lister)
 
 	// Bind first so we know the resolved port before logging the URL.
 	listener, err := net.Listen("tcp", *addr)

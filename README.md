@@ -258,7 +258,6 @@ picture and §6.2 for the synchronous-write / backpressure contract.
 - [`docs/REPLAY.md`](./docs/REPLAY.md) — replay cookbook
 - [`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md) — provider feature matrix
 - [`docs/INSPECT.md`](./docs/INSPECT.md) — `starling-inspect` web inspector
-- [`docs/M2_PLAN.md`](./docs/M2_PLAN.md) — M2 scope + status
 
 ## License
 

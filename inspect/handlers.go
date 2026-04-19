@@ -1,4 +1,4 @@
-package main
+package inspect
 
 import (
 	"net/http"
@@ -19,7 +19,7 @@ import (
 // for server-side filtering. Empty / unknown values return all rows.
 // Client-side text search is provided by app.js on top of the
 // rendered table.
-func (s *server) handleRuns(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
@@ -46,7 +46,7 @@ func (s *server) handleRuns(w http.ResponseWriter, r *http.Request) {
 // inline; the badge at the top reflects eventlog.Validate's verdict.
 //
 // URL: /run/{runID}
-func (s *server) handleRun(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	runID := strings.TrimPrefix(r.URL.Path, "/run/")
 	if runID == "" || strings.Contains(runID, "/") {
 		http.NotFound(w, r)
@@ -83,7 +83,7 @@ func (s *server) handleRun(w http.ResponseWriter, r *http.Request) {
 // Designed for HTMX hx-get; not a full page (no layout).
 //
 // URL: /run/{runID}/event/{seq}
-func (s *server) handleEventDetail(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleEventDetail(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/run/")
 	parts := strings.SplitN(rest, "/event/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
