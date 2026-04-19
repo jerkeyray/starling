@@ -1,0 +1,54 @@
+{{define "content"}}
+<header class="page-head">
+  <h1>Runs <span class="count">{{len .Rows}} of {{.Total}}</span></h1>
+  <div class="controls">
+    <input
+      id="filter"
+      type="search"
+      placeholder="filter by run id…"
+      autocomplete="off"
+      aria-label="filter runs by id"
+    >
+    <nav class="status-tabs" aria-label="filter by status">
+      {{$cur := .Status}}
+      <a href="/" class="tab {{if eq $cur ""}}active{{end}}">all</a>
+      <a href="/?status=completed"   class="tab {{if eq $cur "completed"}}active{{end}}">completed</a>
+      <a href="/?status=failed"      class="tab {{if eq $cur "failed"}}active{{end}}">failed</a>
+      <a href="/?status=cancelled"   class="tab {{if eq $cur "cancelled"}}active{{end}}">cancelled</a>
+      <a href="/?status=in+progress" class="tab {{if eq $cur "in progress"}}active{{end}}">in progress</a>
+    </nav>
+  </div>
+</header>
+
+{{if .Rows}}
+<table class="runs">
+  <thead>
+    <tr>
+      <th>Run ID</th>
+      <th>Started</th>
+      <th class="num">Events</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody id="runs-body">
+    {{range .Rows}}
+    <tr data-runid="{{.RunID}}">
+      <td><a href="/run/{{.RunID}}" class="runid">{{.RunID}}</a></td>
+      <td><time datetime="{{.StartedISO}}">{{.Started}}</time></td>
+      <td class="num">{{.EventCount}}</td>
+      <td><span class="badge badge-{{.StatusClass}}">{{.StatusLabel}}</span></td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="empty">
+  {{if .Status}}
+    No runs with status <code>{{.Status}}</code>.
+    <a href="/">Show all.</a>
+  {{else}}
+    No runs in this log yet.
+  {{end}}
+</p>
+{{end}}
+{{end}}

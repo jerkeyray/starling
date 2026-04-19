@@ -229,6 +229,51 @@ func TestSQLite_StreamDeliversHistoryThenLive(t *testing.T) {
 	}
 }
 
+// TestSQLite_ReadOnly_SeesLiveWrites pins the "agent-while-inspector"
+// contract: a read-only handle opened via WithReadOnly must observe
+// rows that another handle inserts after it opened. WAL mode makes
+// this work; we'd lose it if WithReadOnly ever started passing
+// immutable=1 (which tells SQLite the file cannot change and lets it
+// skip the change-counter check).
+func TestSQLite_ReadOnly_SeesLiveWrites(t *testing.T) {
+	rw, path := openSQLite(t)
+	cb := &chainBuilder{}
+	if err := rw.Append(context.Background(), "r1", cb.next(t, "r1", "first")); err != nil {
+		t.Fatalf("Append (rw, first): %v", err)
+	}
+
+	ro, err := eventlog.NewSQLite(path, eventlog.WithReadOnly())
+	if err != nil {
+		t.Fatalf("NewSQLite read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = ro.Close() })
+
+	// First read sees the one event we already wrote.
+	first, err := ro.Read(context.Background(), "r1")
+	if err != nil {
+		t.Fatalf("Read (ro, before live): %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("Read (ro, before live): got %d events, want 1", len(first))
+	}
+
+	// Writer keeps appending after the read-only handle was opened.
+	if err := rw.Append(context.Background(), "r1", cb.next(t, "r1", "second")); err != nil {
+		t.Fatalf("Append (rw, second): %v", err)
+	}
+
+	// Second read on the SAME read-only handle must observe the new
+	// row — proves we are not holding a stale snapshot or skipping
+	// change-counter validation.
+	second, err := ro.Read(context.Background(), "r1")
+	if err != nil {
+		t.Fatalf("Read (ro, after live): %v", err)
+	}
+	if len(second) != 2 {
+		t.Fatalf("Read (ro, after live): got %d events, want 2 — read-only handle did not pick up live write", len(second))
+	}
+}
+
 // TestSQLite_ReadOnly_RejectsAppend pins the contract that an
 // inspector-style consumer opening with WithReadOnly cannot mutate
 // the log even by accident.

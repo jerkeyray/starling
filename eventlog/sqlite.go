@@ -25,10 +25,15 @@ type sqliteConfig struct {
 	readOnly bool
 }
 
-// WithReadOnly opens the database in read-only mode (mode=ro,
-// immutable=1). Append always fails with ErrReadOnly. Intended for
-// inspector tools that should not be able to mutate the audit log
-// they are inspecting.
+// WithReadOnly opens the database in read-only mode (URI mode=ro).
+// Append always fails with ErrReadOnly. Intended for inspector tools
+// that should not be able to mutate the audit log they are inspecting.
+//
+// Crucially this does NOT pass immutable=1: the inspector is expected
+// to be safe to point at a database that another Starling process is
+// actively writing to. immutable=1 would let SQLite skip WAL and
+// change-counter checks, returning stale or torn reads as soon as the
+// writer touched the file.
 func WithReadOnly() SQLiteOption {
 	return func(c *sqliteConfig) { c.readOnly = true }
 }
@@ -51,10 +56,11 @@ func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error) {
 	dsn := path
 	if cfg.readOnly {
 		// modernc.org/sqlite honors URI parameters when path begins
-		// with "file:". mode=ro opens read-only; immutable=1 promises
-		// the file will not change under us, which lets SQLite skip
-		// shared-cache acquisition and journal lookups.
-		dsn = "file:" + path + "?mode=ro&immutable=1"
+		// with "file:". mode=ro opens read-only; we deliberately do
+		// NOT set immutable=1 because the inspector must remain
+		// correct against a database a live writer is appending to,
+		// and immutable=1 would suppress WAL / change-counter checks.
+		dsn = "file:" + path + "?mode=ro"
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
