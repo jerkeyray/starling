@@ -115,7 +115,7 @@ drain:
 			if err := emit(ctx, c, event.KindReasoningEmitted, event.ReasoningEmitted{
 				TurnID:    turnID,
 				Content:   chunk.Text,
-				Sensitive: false,
+				Sensitive: true, // per EVENTS.md §3.4: always true for schema symmetry
 			}); err != nil {
 				return nil, fmt.Errorf("step.LLMCall: emit ReasoningEmitted: %w", err)
 			}

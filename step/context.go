@@ -106,6 +106,16 @@ func emit[T any](ctx context.Context, c *Context, kind event.Kind, payload T) er
 	return nil
 }
 
+// Emit writes a typed event payload into the run's log, advancing the
+// hash chain under c.mu. Intended for use by the agent loop (root
+// starling package) which emits RunStarted and terminal events itself
+// — step's own helpers use the unexported emit directly.
+//
+// kind must match the payload type. Safe for concurrent use.
+func Emit[T any](ctx context.Context, c *Context, kind event.Kind, payload T) error {
+	return emit(ctx, c, kind, payload)
+}
+
 // ctxKey is a private empty type used as the context-value key. Using a
 // struct{} type (rather than a string) avoids collisions with any other
 // package's context values.
