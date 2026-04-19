@@ -198,6 +198,7 @@ drain:
 	return &provider.Response{
 		Text:            textBuf.String(),
 		ToolUses:        respUses,
+		TurnID:          turnID,
 		StopReason:      stopReason,
 		Usage:           usage,
 		CostUSD:         cost,

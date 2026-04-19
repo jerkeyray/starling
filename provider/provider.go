@@ -108,8 +108,12 @@ type ToolResult struct {
 // step.CallTool, which handles the JSON→CBOR conversion for the event
 // log.
 type Response struct {
-	Text            string
-	ToolUses        []ToolUse
+	Text     string
+	ToolUses []ToolUse
+	// TurnID is the ULID minted by step.LLMCall for this turn. Callers
+	// stamp it onto downstream ToolCall events so each scheduled tool
+	// correlates back to the turn that planned it without a seq walk.
+	TurnID          string
 	StopReason      string
 	Usage           UsageUpdate
 	CostUSD         float64

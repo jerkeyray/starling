@@ -144,7 +144,7 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 		for _, tu := range resp.ToolUses {
 			result, cerr := step.CallTool(ctx, step.ToolCall{
 				CallID: tu.CallID,
-				TurnID: currentTurnID(ctx), // unused in M1; TurnID stamped inside events already via LLMCall
+				TurnID: resp.TurnID,
 				Name:   tu.Name,
 				Args:   tu.Args,
 			})
@@ -440,16 +440,6 @@ func classifyRunError(err error) string {
 	}
 	return "internal"
 }
-
-// currentTurnID is a TODO-shaped helper: the LLMCall-minted TurnID is
-// not currently exposed on the Response, which means the agent loop
-// can't stamp CallTool with the matching TurnID. For M1 we pass an
-// empty TurnID; the link is reconstructable from seq ordering (the
-// TurnStarted event immediately before each ToolCallScheduled).
-//
-// TODO: surface the minted TurnID on provider.Response so this becomes
-// `return resp.TurnID`.
-func currentTurnID(_ context.Context) string { return "" }
 
 // ----------------------------------------------------------------------
 // ULID

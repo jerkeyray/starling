@@ -182,6 +182,20 @@ func TestAgent_ToolRoundTrip(t *testing.T) {
 	if tcc.CallID != "c1" {
 		t.Fatalf("CallID = %q", tcc.CallID)
 	}
+
+	// ToolCallScheduled.TurnID must equal the preceding TurnStarted.TurnID
+	// so replay and external consumers can correlate without a seq walk.
+	ts, err := evs[1].AsTurnStarted()
+	if err != nil {
+		t.Fatalf("decode TurnStarted: %v", err)
+	}
+	tcs, err := evs[3].AsToolCallScheduled()
+	if err != nil {
+		t.Fatalf("decode Scheduled: %v", err)
+	}
+	if tcs.TurnID == "" || tcs.TurnID != ts.TurnID {
+		t.Fatalf("TurnID mismatch: scheduled=%q turn=%q", tcs.TurnID, ts.TurnID)
+	}
 }
 
 func TestAgent_MerkleRootStable(t *testing.T) {
