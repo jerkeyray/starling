@@ -27,6 +27,15 @@ type Context struct {
 	tools    *Registry
 	budget   BudgetConfig
 
+	// mode, recorded, and replayIdx drive the non-determinism helpers
+	// (step.Now / step.Random / step.SideEffect). Under ModeReplay the
+	// helpers scan recorded[replayIdx:] for the next SideEffectRecorded
+	// instead of running their effect.
+	mode      Mode
+	recorded  []event.Event
+	replayIdx int
+	clockFn   func() time.Time
+
 	mu       sync.Mutex
 	nextSeq  uint64
 	prevHash []byte
@@ -43,12 +52,22 @@ func NewContext(cfg Config) *Context {
 	if cfg.RunID == "" {
 		panic("step.NewContext: cfg.RunID is empty")
 	}
+	if cfg.Mode == ModeReplay && cfg.Recorded == nil {
+		panic("step.NewContext: ModeReplay requires cfg.Recorded")
+	}
+	clockFn := cfg.ClockFn
+	if clockFn == nil {
+		clockFn = time.Now
+	}
 	return &Context{
 		log:      cfg.Log,
 		runID:    cfg.RunID,
 		provider: cfg.Provider,
 		tools:    cfg.Tools,
 		budget:   cfg.Budget,
+		mode:     cfg.Mode,
+		recorded: cfg.Recorded,
+		clockFn:  clockFn,
 		nextSeq:  1,
 	}
 }
