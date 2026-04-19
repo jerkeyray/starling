@@ -22,8 +22,19 @@ const sqliteStreamPollInterval = 50 * time.Millisecond
 type SQLiteOption func(*sqliteConfig)
 
 type sqliteConfig struct {
-	// Reserved for future knobs (e.g. custom poll interval, read-only).
+	readOnly bool
 }
+
+// WithReadOnly opens the database in read-only mode (mode=ro,
+// immutable=1). Append always fails with ErrReadOnly. Intended for
+// inspector tools that should not be able to mutate the audit log
+// they are inspecting.
+func WithReadOnly() SQLiteOption {
+	return func(c *sqliteConfig) { c.readOnly = true }
+}
+
+// ErrReadOnly is returned by Append on a log opened with WithReadOnly.
+var ErrReadOnly = errors.New("eventlog: log is read-only")
 
 // NewSQLite opens (or creates) a SQLite database at path and returns
 // an EventLog backed by it. WAL mode and synchronous=NORMAL are
@@ -37,18 +48,28 @@ func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	db, err := sql.Open("sqlite", path)
+	dsn := path
+	if cfg.readOnly {
+		// modernc.org/sqlite honors URI parameters when path begins
+		// with "file:". mode=ro opens read-only; immutable=1 promises
+		// the file will not change under us, which lets SQLite skip
+		// shared-cache acquisition and journal lookups.
+		dsn = "file:" + path + "?mode=ro&immutable=1"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("eventlog/sqlite: open: %w", err)
 	}
 	// A single writer keeps BEGIN IMMEDIATE simple; readers come in on
 	// separate connections from the driver pool.
 	db.SetMaxOpenConns(8)
-	if err := initSQLite(db); err != nil {
-		_ = db.Close()
-		return nil, err
+	if !cfg.readOnly {
+		if err := initSQLite(db); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
-	return &sqliteLog{db: db}, nil
+	return &sqliteLog{db: db, readOnly: cfg.readOnly}, nil
 }
 
 func initSQLite(db *sql.DB) error {
@@ -78,13 +99,17 @@ func initSQLite(db *sql.DB) error {
 }
 
 type sqliteLog struct {
-	db *sql.DB
+	db       *sql.DB
+	readOnly bool
 
 	mu     sync.RWMutex
 	closed bool
 }
 
 func (s *sqliteLog) Append(ctx context.Context, runID string, ev event.Event) error {
+	if s.readOnly {
+		return ErrReadOnly
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

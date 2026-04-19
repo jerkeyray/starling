@@ -68,7 +68,7 @@ func TestListRuns_Empty(t *testing.T) {
 		t.Run(bk.name, func(t *testing.T) {
 			log := bk.open(t)
 			defer log.Close()
-			runs, err := log.ListRuns(context.Background())
+			runs, err := log.(eventlog.RunLister).ListRuns(context.Background())
 			if err != nil {
 				t.Fatalf("ListRuns: %v", err)
 			}
@@ -109,7 +109,7 @@ func TestListRuns_PerRunSummary(t *testing.T) {
 				t.Fatalf("append r2.1: %v", err)
 			}
 
-			runs, err := log.ListRuns(ctx)
+			runs, err := log.(eventlog.RunLister).ListRuns(ctx)
 			if err != nil {
 				t.Fatalf("ListRuns: %v", err)
 			}
@@ -186,7 +186,7 @@ func TestListRuns_NewestFirst(t *testing.T) {
 				}
 			}
 
-			runs, err := log.ListRuns(ctx)
+			runs, err := log.(eventlog.RunLister).ListRuns(ctx)
 			if err != nil {
 				t.Fatalf("ListRuns: %v", err)
 			}
@@ -208,7 +208,7 @@ func TestListRuns_AfterClose(t *testing.T) {
 		t.Run(bk.name, func(t *testing.T) {
 			log := bk.open(t)
 			log.Close()
-			if _, err := log.ListRuns(context.Background()); err == nil {
+			if _, err := log.(eventlog.RunLister).ListRuns(context.Background()); err == nil {
 				t.Fatal("ListRuns after Close: want error, got nil")
 			}
 		})

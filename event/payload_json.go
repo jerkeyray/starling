@@ -5,9 +5,9 @@ import (
 	"fmt"
 )
 
-// PayloadJSON returns the event's payload decoded into its typed
-// struct and re-encoded as JSON. It is the wire format the inspector
-// UI (and any other JSON-consuming tooling) reads.
+// ToJSON returns ev's payload decoded into its typed struct and re-
+// encoded as JSON. It is the wire format the inspector UI (and any
+// other JSON-consuming tooling) reads.
 //
 // The returned bytes use the same field names as the CBOR wire format
 // (snake_case) — every payload struct in this package carries
@@ -19,11 +19,16 @@ import (
 // nested cborenc.RawMessage (Args, Params, Value) can decode it
 // separately via cborenc.Unmarshal into a generic map[string]any.
 //
-// Returns an error if e.Kind is unknown or if the payload fails to
+// ToJSON is a free function rather than a method on Event because
+// the JSON projection is an inspector concern, not a core event-
+// envelope concern: keeping it as a function makes future
+// deprecation (and inspector-local replacement) cheap.
+//
+// Returns an error if ev.Kind is unknown or if the payload fails to
 // decode against its expected type — the latter usually means the
 // log was written by a newer Starling version with a richer payload.
-func (e Event) PayloadJSON() ([]byte, error) {
-	v, err := e.payloadValue()
+func ToJSON(ev Event) ([]byte, error) {
+	v, err := payloadValue(ev)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +37,7 @@ func (e Event) PayloadJSON() ([]byte, error) {
 
 // payloadValue dispatches on Kind, calling the matching AsXxx
 // accessor and returning the typed payload as an any.
-func (e Event) payloadValue() (any, error) {
+func payloadValue(e Event) (any, error) {
 	switch e.Kind {
 	case KindRunStarted:
 		return e.AsRunStarted()
@@ -63,5 +68,5 @@ func (e Event) payloadValue() (any, error) {
 	case KindRunCancelled:
 		return e.AsRunCancelled()
 	}
-	return nil, fmt.Errorf("event: PayloadJSON: unknown kind %s", e.Kind)
+	return nil, fmt.Errorf("event: ToJSON: unknown kind %s", e.Kind)
 }

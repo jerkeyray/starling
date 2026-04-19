@@ -228,3 +228,40 @@ func TestSQLite_StreamDeliversHistoryThenLive(t *testing.T) {
 		t.Fatal("live event not delivered within 2s")
 	}
 }
+
+// TestSQLite_ReadOnly_RejectsAppend pins the contract that an
+// inspector-style consumer opening with WithReadOnly cannot mutate
+// the log even by accident.
+func TestSQLite_ReadOnly_RejectsAppend(t *testing.T) {
+	// First create a writable log with one run, then close and
+	// re-open read-only.
+	rw, path := openSQLite(t)
+	cb := &chainBuilder{}
+	if err := rw.Append(context.Background(), "r1", cb.next(t, "r1", "hi")); err != nil {
+		t.Fatalf("Append (rw): %v", err)
+	}
+	if err := rw.Close(); err != nil {
+		t.Fatalf("rw.Close: %v", err)
+	}
+
+	ro, err := eventlog.NewSQLite(path, eventlog.WithReadOnly())
+	if err != nil {
+		t.Fatalf("NewSQLite read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = ro.Close() })
+
+	// Read still works.
+	evs, err := ro.Read(context.Background(), "r1")
+	if err != nil {
+		t.Fatalf("Read (ro): %v", err)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("Read (ro): got %d events, want 1", len(evs))
+	}
+
+	// Append must be rejected with ErrReadOnly.
+	err = ro.Append(context.Background(), "r1", cb.next(t, "r1", "should-fail"))
+	if !errors.Is(err, eventlog.ErrReadOnly) {
+		t.Fatalf("Append (ro): err = %v, want ErrReadOnly", err)
+	}
+}

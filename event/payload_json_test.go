@@ -8,11 +8,11 @@ import (
 	"github.com/jerkeyray/starling/event"
 )
 
-// TestPayloadJSON_AllKinds round-trips one event of every Kind through
-// EncodePayload → Event → PayloadJSON → json.Unmarshal back into a map,
+// TestToJSON_AllKinds round-trips one event of every Kind through
+// EncodePayload → Event → ToJSON → json.Unmarshal back into a map,
 // asserting the JSON shape uses snake_case (matching the cbor wire
 // format) and not Go field names.
-func TestPayloadJSON_AllKinds(t *testing.T) {
+func TestToJSON_AllKinds(t *testing.T) {
 	cases := []struct {
 		name      string
 		kind      event.Kind
@@ -42,12 +42,12 @@ func TestPayloadJSON_AllKinds(t *testing.T) {
 				t.Fatalf("EncodePayload: %v", err)
 			}
 			ev := event.Event{Kind: tc.kind, Payload: encoded}
-			out, err := ev.PayloadJSON()
+			out, err := event.ToJSON(ev)
 			if err != nil {
-				t.Fatalf("PayloadJSON: %v", err)
+				t.Fatalf("ToJSON: %v", err)
 			}
 			if !strings.Contains(string(out), `"`+tc.fieldHint+`"`) {
-				t.Fatalf("PayloadJSON output missing snake_case field %q: %s", tc.fieldHint, out)
+				t.Fatalf("ToJSON output missing snake_case field %q: %s", tc.fieldHint, out)
 			}
 			// Must be valid JSON.
 			var generic map[string]any
@@ -58,12 +58,12 @@ func TestPayloadJSON_AllKinds(t *testing.T) {
 	}
 }
 
-// TestPayloadJSON_UnknownKind asserts the dispatcher returns an error
+// TestToJSON_UnknownKind asserts the dispatcher returns an error
 // rather than silently emitting "{}" — operators should know when an
 // inspector hits an event kind it can't decode.
-func TestPayloadJSON_UnknownKind(t *testing.T) {
+func TestToJSON_UnknownKind(t *testing.T) {
 	ev := event.Event{Kind: event.Kind(99)}
-	if _, err := ev.PayloadJSON(); err == nil {
-		t.Fatal("PayloadJSON for unknown kind: want error, got nil")
+	if _, err := event.ToJSON(ev); err == nil {
+		t.Fatal("ToJSON for unknown kind: want error, got nil")
 	}
 }

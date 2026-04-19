@@ -50,16 +50,28 @@ type EventLog interface {
 	// enough behind that its buffer overflows.
 	Stream(ctx context.Context, runID string) (<-chan event.Event, error)
 
-	// ListRuns returns one RunSummary per run present in the log,
-	// ordered by StartedAt descending (newest first). An empty log
-	// returns (nil, nil). Backends should implement this with a single
-	// indexed query — callers may invoke it on every page-load of an
-	// inspector UI.
-	ListRuns(ctx context.Context) ([]RunSummary, error)
-
 	// Close releases all resources and closes every live subscriber
 	// channel. Idempotent.
 	Close() error
+}
+
+// RunLister is implemented by EventLog backends that can enumerate the
+// runs they hold. It is intentionally separate from EventLog so custom
+// backends (write-only sinks, network forwarders, ...) are not forced
+// to support enumeration. Inspector-style consumers type-assert:
+//
+//	if lister, ok := log.(eventlog.RunLister); ok {
+//	    runs, err := lister.ListRuns(ctx)
+//	    ...
+//	}
+//
+// Both built-in backends (NewInMemory, NewSQLite) satisfy this
+// interface.
+type RunLister interface {
+	// ListRuns returns one RunSummary per run present in the log,
+	// ordered by StartedAt descending (newest first). An empty log
+	// returns (nil, nil).
+	ListRuns(ctx context.Context) ([]RunSummary, error)
 }
 
 // ErrLogClosed is returned by any operation on a closed EventLog.
