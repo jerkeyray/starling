@@ -51,6 +51,7 @@ type Server struct {
 	tpl      *templates
 	mux      *http.ServeMux
 	replayer replay.Factory // nil → view-only; replay routes hidden / 404
+	auth     Authenticator  // nil → public (default localhost posture)
 
 	sessMu   sync.Mutex
 	sessions map[string]*replaySession
@@ -198,7 +199,22 @@ func (s *Server) dispatchRun(w http.ResponseWriter, r *http.Request) {
 	s.handleRun(w, r, rest)
 }
 
-// ServeHTTP implements http.Handler.
+// ServeHTTP implements http.Handler. Runs auth (if configured) and
+// double-submit CSRF (always-on for the two replay POSTs) before the
+// mux. Rationale for the single chokepoint: a half-auth posture
+// (static public, pages private) invites reflected-file tricks and
+// buys no meaningful UX — unauthenticated users should see a bare
+// 401, not a broken-CSS page.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.auth != nil && !s.auth(r) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="starling-inspect"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	s.ensureCSRFCookie(w, r)
+	if isReplayPOST(r) && !s.checkCSRF(r) {
+		http.Error(w, "bad csrf token", http.StatusForbidden)
+		return
+	}
 	s.mux.ServeHTTP(w, r)
 }

@@ -18,3 +18,19 @@ func WithReplayer(factory replay.Factory) Option {
 		s.replayer = factory
 	}
 }
+
+// WithAuth installs an authentication middleware that runs before
+// every request reaches the mux. Passing nil is a no-op — the server
+// stays public, matching the default localhost-developer posture. See
+// Authenticator and BearerAuth for the shape and the one built-in
+// helper.
+//
+// The middleware gates page routes, the HTMX event-detail fragment,
+// the live-tail SSE, static assets, and the replay endpoints alike.
+// Unauthenticated requests receive 401 with
+// WWW-Authenticate: Bearer realm="starling-inspect".
+func WithAuth(fn Authenticator) Option {
+	return func(s *Server) {
+		s.auth = fn
+	}
+}

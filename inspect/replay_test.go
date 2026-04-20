@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -147,7 +149,10 @@ func TestReplayEndpoints_HiddenWhenNoReplayer(t *testing.T) {
 	hs := httptest.NewServer(srv)
 	t.Cleanup(hs.Close)
 
-	resp, err := http.Post(hs.URL+"/run/"+runID+"/replay", "application/json", nil)
+	client, token := primeCSRF(t, hs)
+	req, _ := http.NewRequest(http.MethodPost, hs.URL+"/run/"+runID+"/replay", nil)
+	req.Header.Set(csrfHeaderName, token)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -165,7 +170,11 @@ func TestReplayStart_ReturnsSessionID(t *testing.T) {
 	hs := httptest.NewServer(srv)
 	t.Cleanup(hs.Close)
 
-	resp, err := http.Post(hs.URL+"/run/"+runID+"/replay", "application/json", nil)
+	client, token := primeCSRF(t, hs)
+	req, _ := http.NewRequest(http.MethodPost, hs.URL+"/run/"+runID+"/replay", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(csrfHeaderName, token)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -194,7 +203,10 @@ func TestReplayStart_UnknownRun_404(t *testing.T) {
 	hs := httptest.NewServer(srv)
 	t.Cleanup(hs.Close)
 
-	resp, err := http.Post(hs.URL+"/run/no-such-run/replay", "application/json", nil)
+	client, token := primeCSRF(t, hs)
+	req, _ := http.NewRequest(http.MethodPost, hs.URL+"/run/no-such-run/replay", nil)
+	req.Header.Set(csrfHeaderName, token)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -257,8 +269,12 @@ func TestReplayControl_UnknownAction_400(t *testing.T) {
 
 	sessionID := startSession(t, hs, runID)
 
+	client, token := primeCSRF(t, hs)
 	body := strings.NewReader(`{"action":"frobnicate"}`)
-	resp, err := http.Post(hs.URL+"/run/"+runID+"/replay/"+sessionID+"/control", "application/json", body)
+	req, _ := http.NewRequest(http.MethodPost, hs.URL+"/run/"+runID+"/replay/"+sessionID+"/control", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(csrfHeaderName, token)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -273,8 +289,12 @@ func TestReplayControl_UnknownSession_404(t *testing.T) {
 	hs := httptest.NewServer(srv)
 	t.Cleanup(hs.Close)
 
+	client, token := primeCSRF(t, hs)
 	body := strings.NewReader(`{"action":"pause"}`)
-	resp, err := http.Post(hs.URL+"/run/"+runID+"/replay/deadbeef/control", "application/json", body)
+	req, _ := http.NewRequest(http.MethodPost, hs.URL+"/run/"+runID+"/replay/deadbeef/control", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(csrfHeaderName, token)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -320,7 +340,10 @@ func TestReplay_SessionMaxRejects(t *testing.T) {
 	for i := 0; i < sessionMax; i++ {
 		startSession(t, hs, runID)
 	}
-	resp, err := http.Post(hs.URL+"/run/"+runID+"/replay", "application/json", nil)
+	client, token := primeCSRF(t, hs)
+	req, _ := http.NewRequest(http.MethodPost, hs.URL+"/run/"+runID+"/replay", nil)
+	req.Header.Set(csrfHeaderName, token)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -363,8 +386,14 @@ func TestRoutes_NamespacedRunID(t *testing.T) {
 		{"replay start", "POST", "/run/" + encoded + "/replay", http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			client := http.DefaultClient
 			req, _ := http.NewRequest(tc.method, hs.URL+tc.path, nil)
-			resp, err := http.DefaultClient.Do(req)
+			if tc.method == http.MethodPost {
+				var token string
+				client, token = primeCSRF(t, hs)
+				req.Header.Set(csrfHeaderName, token)
+			}
+			resp, err := client.Do(req)
 			if err != nil {
 				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
 			}
@@ -382,7 +411,11 @@ func TestRoutes_NamespacedRunID(t *testing.T) {
 
 func startSession(t *testing.T, hs *httptest.Server, runID string) string {
 	t.Helper()
-	resp, err := http.Post(hs.URL+"/run/"+runID+"/replay", "application/json", nil)
+	client, token := primeCSRF(t, hs)
+	req, _ := http.NewRequest(http.MethodPost, hs.URL+"/run/"+runID+"/replay", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(csrfHeaderName, token)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST start: %v", err)
 	}
@@ -402,8 +435,12 @@ func startSession(t *testing.T, hs *httptest.Server, runID string) string {
 
 func postControl(t *testing.T, hs *httptest.Server, runID, sessionID, action string) {
 	t.Helper()
+	client, token := primeCSRF(t, hs)
 	body := strings.NewReader(fmt.Sprintf(`{"action":%q}`, action))
-	resp, err := http.Post(hs.URL+"/run/"+runID+"/replay/"+sessionID+"/control", "application/json", body)
+	req, _ := http.NewRequest(http.MethodPost, hs.URL+"/run/"+runID+"/replay/"+sessionID+"/control", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(csrfHeaderName, token)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST control %s: %v", action, err)
 	}
@@ -411,6 +448,33 @@ func postControl(t *testing.T, hs *httptest.Server, runID, sessionID, action str
 	if resp.StatusCode >= 300 {
 		t.Fatalf("control %s status = %d", action, resp.StatusCode)
 	}
+}
+
+// primeCSRF returns a client with a cookie jar already carrying the
+// starling_csrf cookie (planted by a GET to /), plus the cookie's
+// value for echoing into X-CSRF-Token. Every test that POSTs to a
+// replay endpoint routes through this to satisfy the always-on
+// double-submit middleware.
+func primeCSRF(t *testing.T, hs *httptest.Server) (*http.Client, string) {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+	resp, err := client.Get(hs.URL + "/")
+	if err != nil {
+		t.Fatalf("prime GET: %v", err)
+	}
+	resp.Body.Close()
+	u, _ := url.Parse(hs.URL)
+	for _, c := range jar.Cookies(u) {
+		if c.Name == csrfCookieName {
+			return client, c.Value
+		}
+	}
+	t.Fatalf("no csrf cookie planted on prime GET")
+	return nil, ""
 }
 
 // sseEvent is one parsed SSE frame.

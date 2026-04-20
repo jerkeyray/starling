@@ -160,11 +160,22 @@
   // session lifecycle
   // ----------------------------------------------------------------
 
+  // csrfToken reads the double-submit cookie planted by the server on
+  // any GET. Returning "" is survivable only for GETs — POSTs without
+  // a matching header will 403 at the middleware.
+  function csrfToken() {
+    const m = document.cookie.match(/(?:^|;\s*)starling_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : "";
+  }
+
   async function startSession() {
     setStatus("starting…", "init");
     const resp = await fetch("/run/" + encodeURIComponent(cfg.runID) + "/replay", {
       method:  "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type":  "application/json",
+        "X-CSRF-Token":  csrfToken(),
+      },
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
@@ -227,7 +238,10 @@
     if (!sessionID) return;
     const resp = await fetch(controlURL(), {
       method:  "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type":  "application/json",
+        "X-CSRF-Token":  csrfToken(),
+      },
       body:    JSON.stringify({ action: action }),
     });
     if (!resp.ok) {

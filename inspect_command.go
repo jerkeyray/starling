@@ -68,6 +68,18 @@ type InspectCmd struct {
 	// Output is where logs and flag errors are written. Defaults to
 	// os.Stderr.
 	Output io.Writer
+
+	// Token, when non-empty, enables bearer-token auth on every
+	// inspector route. Clients must send
+	// `Authorization: Bearer <token>`.
+	//
+	// If empty, the --token flag is consulted, then the
+	// STARLING_INSPECT_TOKEN environment variable. If all three are
+	// empty, the inspector runs unauthenticated (default localhost
+	// posture). Callers wanting a different auth scheme (JWT, mTLS,
+	// IP allowlist, …) should build the inspect.Server themselves
+	// with inspect.WithAuth instead.
+	Token string
 }
 
 // Run parses args, opens the log read-only, starts the inspector
@@ -104,6 +116,8 @@ func (c *InspectCmd) Run(args []string) error {
 	addr := fs.String("addr", "127.0.0.1:0",
 		"bind address (host:port); port 0 picks a free port. Default binds loopback only.")
 	noOpen := fs.Bool("no-open", false, "do not auto-open the browser")
+	tokenFlag := fs.String("token", "",
+		"bearer token required on every request. Env: STARLING_INSPECT_TOKEN. Empty = no auth (default).")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -122,9 +136,21 @@ func (c *InspectCmd) Run(args []string) error {
 	}
 	defer store.Close()
 
+	// Token precedence: explicit field > --token flag > env var.
+	token := c.Token
+	if token == "" {
+		token = *tokenFlag
+	}
+	if token == "" {
+		token = os.Getenv("STARLING_INSPECT_TOKEN")
+	}
+
 	opts := []inspect.Option{}
 	if c.Factory != nil {
 		opts = append(opts, inspect.WithReplayer(c.Factory))
+	}
+	if token != "" {
+		opts = append(opts, inspect.WithAuth(inspect.BearerAuth(token)))
 	}
 	srv, err := inspect.New(store, opts...)
 	if err != nil {
@@ -142,6 +168,11 @@ func (c *InspectCmd) Run(args []string) error {
 	logger.Printf("opened %s read-only", dbPath)
 	if c.Factory != nil {
 		logger.Printf("replay-from-UI enabled")
+	}
+	if token != "" {
+		logger.Printf("auth: bearer (token via %s)", tokenSource(c.Token, *tokenFlag))
+	} else {
+		logger.Printf("auth: none")
 	}
 
 	httpSrv := &http.Server{
@@ -173,6 +204,19 @@ func (c *InspectCmd) Run(args []string) error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return nil
+}
+
+// tokenSource reports where the bearer token came from, for the
+// startup log line. The token itself is never logged.
+func tokenSource(fieldVal, flagVal string) string {
+	switch {
+	case fieldVal != "":
+		return "InspectCmd.Token"
+	case flagVal != "":
+		return "--token"
+	default:
+		return "STARLING_INSPECT_TOKEN env"
+	}
 }
 
 // browserURL normalises wildcard bind addresses ("", "0.0.0.0", "::")

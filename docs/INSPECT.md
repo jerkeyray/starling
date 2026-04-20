@@ -127,13 +127,28 @@ beyond `localhost`.
   that calls `EventLog.Append`. An inspector cannot mutate the log
   it is inspecting, even by accident.
 - **Loopback by default.** `--addr` defaults to `127.0.0.1:0`. The
-  inspector has **no authentication**. Binding to a non-loopback
-  interface puts the entire event log — every prompt, every
-  tool argument, every assistant response — in plaintext in front of
-  anyone who can reach the port.
-- **If you need remote access**, terminate auth in a reverse proxy
-  (nginx, Caddy, Cloudflare Access, tailscale serve) and bind the
-  inspector to loopback. Do not skip this step.
+  inspector ships with auth **off** — binding to a non-loopback
+  interface without setting a token puts the entire event log (every
+  prompt, every tool argument, every assistant response) in
+  plaintext in front of anyone who can reach the port.
+- **Bearer-token auth** (`--token=<s>` / `STARLING_INSPECT_TOKEN=<s>` /
+  `inspect.WithAuth(fn)`) gates every route — pages, the live-tail
+  SSE, static assets, and the replay POSTs — with a constant-time
+  bearer comparison. Clients send `Authorization: Bearer <token>`;
+  unauthenticated requests get 401 with
+  `WWW-Authenticate: Bearer realm="starling-inspect"`. `WithAuth`
+  accepts any `func(*http.Request) bool`, so JWT / mTLS / IP-allowlist
+  policies drop in without a core change.
+- **CSRF protection is always on** for the two replay POST endpoints
+  (`POST /run/{id}/replay`, `POST /run/{id}/replay/{session}/control`).
+  Double-submit cookie: any GET plants `starling_csrf=<random>`
+  (`SameSite=Strict`, not HttpOnly); `replay.js` echoes it into the
+  `X-CSRF-Token` header on every POST; a scripted client must do the
+  same (one GET to seed, then POST with both the cookie and the
+  header).
+- **If you need remote access**, set a token and terminate TLS in a
+  reverse proxy (nginx, Caddy, Cloudflare Access, tailscale serve).
+  The in-process auth is not a substitute for TLS.
 - **Live writes are visible.** `WithReadOnly()` opens the SQLite file
   with `?mode=ro` (no `immutable=1`), so a Starling process actively
   writing to the same DB stays correct: the inspector sees new rows
