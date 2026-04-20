@@ -73,7 +73,25 @@ func (a *Agent) Resume(ctx context.Context, runID, extraMessage string) (*RunRes
 func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts ...ResumeOption) (*RunResult, error)
 ```
 
-Stream is not yet shipped — see §10.
+Stream returns a channel delivering one `StepEvent` per emitted event
+for a live run. Terminal events are always the last item on the
+channel before it closes.
+
+```go
+// Stream starts a new agent run and returns a channel of StepEvents.
+// Setup errors (validation, log subscribe) return synchronously; the
+// channel is nil on that path. Run-time errors surface as a terminal
+// StepEvent (Kind=RunFailed/RunCancelled, Err populated) and then the
+// channel closes — Stream itself does not return a second error.
+//
+// The channel has a small buffer (64); consumers should drain
+// promptly or risk losing events via the eventlog's slow-subscriber
+// drop policy. The channel still closes cleanly in that case.
+//
+// On ctx cancel the agent run is cancelled (standard ctx plumbing)
+// and the channel closes after draining any in-flight events.
+func (a *Agent) Stream(ctx context.Context, goal string) (runID string, events <-chan StepEvent, err error)
+```
 
 ### 1.2 RunResult
 
@@ -94,8 +112,8 @@ type RunResult struct {
 
 ### 1.3 StepEvent
 
-User-facing view of an event, defined for the (still-deferred) streaming
-API. Narrower than the raw `event.Event`.
+User-facing view of an event, produced by `(*Agent).Stream`. Narrower
+than the raw `event.Event`.
 
 ```go
 type StepEvent struct {
@@ -644,12 +662,34 @@ func main() {
 
 ---
 
-## 8. Streaming example (deferred)
+## 8. Streaming example
 
-`Agent.Stream` is not yet shipped. The closest current API is
-`eventlog.EventLog.Stream`, which delivers every event for a given
-runID — combine with `Agent.Run` (or `Agent.RunReplayInto`) in another
-goroutine for live observation.
+`Agent.Stream` starts a run and returns a channel of `StepEvent`s:
+
+```go
+runID, events, err := a.Stream(ctx, "do the thing")
+if err != nil {
+    log.Fatal(err)
+}
+for se := range events {
+    switch se.Kind {
+    case event.KindAssistantMessageCompleted:
+        fmt.Println("assistant:", se.Text)
+    case event.KindToolCallScheduled:
+        fmt.Printf("tool: %s (%s)\n", se.Tool, se.CallID)
+    case event.KindRunCompleted:
+        fmt.Println("done:", se.Text)
+    case event.KindRunFailed, event.KindRunCancelled:
+        fmt.Println("terminal:", se.Err)
+    }
+}
+_ = runID
+```
+
+Terminal events are always the last item on the channel before it
+closes. Consumers should drain promptly; the channel buffer is 64 and
+the underlying `eventlog.Stream` may drop slow subscribers (the
+channel still closes cleanly in that case).
 
 ---
 

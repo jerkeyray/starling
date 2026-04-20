@@ -88,18 +88,33 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	if err := a.validate(); err != nil {
 		return nil, err
 	}
+	return a.runWithID(ctx, a.mintRunID(), goal)
+}
 
-	var runID string
+// mintRunID returns the RunID to use for this Run / Stream invocation.
+// In replay mode it reads the RunID verbatim from the first recorded
+// event (which already carries whatever namespace prefix the original
+// run wrote); in live mode it mints a fresh ULID and applies the
+// configured Namespace prefix.
+//
+// Caller must have already passed validate(); this helper does not
+// re-check preconditions.
+func (a *Agent) mintRunID() string {
 	if len(a.replayRecorded) > 0 {
-		// Replay uses the recorded RunID verbatim — it already carries
-		// whatever namespace prefix the original run wrote.
-		runID = a.replayRecorded[0].RunID
-	} else {
-		runID = newULID()
-		if a.Namespace != "" {
-			runID = a.Namespace + "/" + runID
-		}
+		return a.replayRecorded[0].RunID
 	}
+	id := newULID()
+	if a.Namespace != "" {
+		id = a.Namespace + "/" + id
+	}
+	return id
+}
+
+// runWithID is Run's body with a pre-assigned runID. Exposed internally
+// so Stream can subscribe to log events under a known runID before the
+// run goroutine emits RunStarted. Run is a thin wrapper that validates
+// and calls mintRunID.
+func (a *Agent) runWithID(ctx context.Context, runID string, goal string) (*RunResult, error) {
 	startWall := time.Now()
 
 	// Metrics: bump the started/in-flight counters as early as possible
