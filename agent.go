@@ -182,15 +182,16 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 // tool uses), or an error to feed into emitTerminal.
 func (a *Agent) react(ctx context.Context, goal string) error {
 	msgs := []provider.Message{{Role: provider.RoleUser, Content: goal}}
+	// Config.MaxTurns is the documented contract: 0 (or negative) means
+	// unlimited; positive caps the loop. ctx cancellation and budget
+	// limits are the safety nets when the cap is off.
 	maxTurns := a.Config.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = 16 // conservative default; callers can override
-	}
+	unlimited := maxTurns <= 0
 
 	sc, _ := step.From(ctx)
 	logger := sc.Logger()
 
-	for turn := 0; turn < maxTurns; turn++ {
+	for turn := 0; unlimited || turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

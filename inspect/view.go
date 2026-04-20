@@ -6,11 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 )
+
+// runPathEscape mirrors the runPath template func: URL-escapes each
+// "/"-separated segment of a runID. Used by view-model builders that
+// emit URLs (DetailURL, etc.) so namespaced runs route correctly even
+// if the namespace contains URL-reserved characters.
+func runPathEscape(runID string) string {
+	segs := strings.Split(runID, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return strings.Join(segs, "/")
+}
 
 // runRow is the per-run view model the runs.html template iterates
 // over. Keeping a dedicated struct lets the template stay declarative
@@ -234,7 +248,7 @@ func rowsFromEvents(runID string, events []event.Event) []eventRow {
 			Family:    kindFamily(ev.Kind),
 			Summary:   summary,
 			CallID:    callID,
-			DetailURL: fmt.Sprintf("/run/%s/event/%d", runID, ev.Seq),
+			DetailURL: fmt.Sprintf("/run/%s/event/%d", runPathEscape(runID), ev.Seq),
 		}
 	}
 	return out

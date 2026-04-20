@@ -11,40 +11,53 @@
 
 ```go
 type Agent struct {
-    Provider provider.Provider
-    Tools    []tool.Tool
-    Log      log.EventLog
-    Budget   *Budget          // optional
-    Config   Config
+    Provider  provider.Provider
+    Tools     []tool.Tool
+    Log       eventlog.EventLog
+    Budget    *Budget   // optional; zero on any axis disables that axis
+    Config    Config
+    Namespace string    // optional RunID prefix; must not contain "/"
 }
 
 type Config struct {
-    Model         string
-    SystemPrompt  string
-    Params        cbor.RawMessage  // provider-specific params (temperature, top_p, max_tokens, ...)
-    MaxTurns      int              // 0 = unlimited (not recommended)
-    Tracer        trace.TracerProvider  // OTel, optional
+    Model        string
+    SystemPrompt string
+    Params       cborenc.RawMessage  // provider-specific params (temperature, top_p, max_tokens, ...)
+    MaxTurns     int                 // 0 = unlimited (the run is still bounded by ctx and Budget)
+    Logger       *slog.Logger        // optional; defaults to slog.Default()
 }
 ```
 
 Methods:
 
 ```go
-// Run starts a new agent run. Returns the final result plus the run ID for later replay.
+// Run starts a new agent run. Returns the final result plus the run ID
+// (which is Namespace + "/" + ULID when Namespace is set).
 func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error)
 
-// Resume loads an in-progress run from the log and continues it.
-// Optionally injects a new user message.
-func (a *Agent) Resume(ctx context.Context, runID string, extraMessage string) (*RunResult, error)
+// RunReplay re-executes a previously-recorded sequence of events
+// against a's current Provider/Tools, using the recording as the
+// LLM/side-effect oracle, and returns nil iff every produced event
+// matched the recording. Useful for ad-hoc verification; for a
+// streaming UI-driven replay see the replay package and inspect.WithReplayer.
+func (a *Agent) RunReplay(ctx context.Context, recorded []event.Event) error
 
-// Replay re-runs the agent loop against a recorded log. In state-faithful mode (default),
-// LLM and tool calls return recorded results. Returns the reproduced RunResult.
-func (a *Agent) Replay(ctx context.Context, runID string, opts ...ReplayOption) (*RunResult, error)
-
-// Stream starts a new run and emits StepEvents as they occur. Caller drains the channel.
-// The run continues even if the caller stops draining (events still written to log).
-func (a *Agent) Stream(ctx context.Context, goal string) (runID string, events <-chan StepEvent, err error)
+// RunReplayInto is the streaming variant of RunReplay: it writes every
+// produced event into sink as it goes, so callers can subscribe via
+// sink.Stream and observe the replay live.
+func (a *Agent) RunReplayInto(ctx context.Context, recorded []event.Event, sink eventlog.EventLog) error
 ```
+
+There is also a package-level helper:
+
+```go
+// Replay re-runs the recording stored in log under runID against a, and
+// returns ErrNonDeterminism (or another error) on mismatch. Thin wrapper
+// over (*Agent).RunReplay.
+func Replay(ctx context.Context, log eventlog.EventLog, runID string, a *Agent) error
+```
+
+Resume and Stream are not yet shipped — see §10.
 
 ### 1.2 RunResult
 
@@ -65,17 +78,18 @@ type RunResult struct {
 
 ### 1.3 StepEvent
 
-User-facing view of an event. Narrower than the raw `event.Event`.
+User-facing view of an event, defined for the (still-deferred) streaming
+API. Narrower than the raw `event.Event`.
 
 ```go
 type StepEvent struct {
-    Kind    event.Kind
-    TurnID  string
-    CallID  string
-    Text    string        // for AssistantMessageCompleted or token-stream chunks
-    Tool    string        // for tool call events
-    Err     error         // non-nil on Failed kinds
-    Raw     event.Event   // full event for consumers who want it
+    Kind   event.Kind
+    TurnID string
+    CallID string
+    Text   string        // for AssistantMessageCompleted or token-stream chunks
+    Tool   string        // for tool call events
+    Err    error         // non-nil on Failed kinds
+    Raw    event.Event   // full event for consumers who want it
 }
 ```
 
@@ -126,16 +140,10 @@ func (e *ProviderError) Unwrap() error { return e.Err }
 
 ### 1.6 Replay options
 
-```go
-type ReplayOption func(*replayConfig)
-
-// ReplayReexecute re-runs LLM and tool calls during replay. Requires a response cache
-// (provided via option or internally constructed from the log). Cache miss = live call.
-func ReplayReexecute() ReplayOption
-
-// ReplayStrict fails immediately on non-determinism (default is strict).
-func ReplayStrict(b bool) ReplayOption
-```
+The current replay path is strict and side-effect-free by construction:
+the recording is the oracle, and any mismatch returns an error wrapping
+`ErrNonDeterminism`. There are no public option toggles. A re-execute /
+cache-miss-falls-back-to-live mode is on the roadmap but not shipped.
 
 ---
 
@@ -196,9 +204,8 @@ func NewInMemory() EventLog
 // SQLite-backed implementation (M2). Default durable backend. Pure Go via modernc.org/sqlite.
 func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error)
 
-// Postgres-backed implementation (M2). For users with existing Postgres infra.
-// Caller supplies the *sql.DB so connection pooling / migrations stay in their control.
-func NewPostgres(db *sql.DB) (EventLog, error)
+// A Postgres backend is on the roadmap (NewPostgres) but not yet
+// implemented. SQLite is the only durable backend shipped today.
 
 // SQLiteOption tunes SQLite open behavior.
 type SQLiteOption func(*sqliteConfig)
@@ -612,31 +619,81 @@ func main() {
         fmt.Printf("  %d %s\n", ev.Seq, ev.Kind)
     }
 
-    // Later: replay
-    replayed, err := agent.Replay(ctx, result.RunID)
-    if err != nil { log.Fatal(err) }
-    fmt.Println("Replayed:", replayed.FinalText) // identical
+    // Later: verify the run is reproducible.
+    if err := starling.Replay(ctx, agent.Log, result.RunID, agent); err != nil {
+        log.Fatalf("replay failed: %v", err)
+    }
 }
 ```
 
 ---
 
-## 8. Streaming example (M3)
+## 8. Streaming example (deferred)
+
+`Agent.Stream` is not yet shipped. The closest current API is
+`eventlog.EventLog.Stream`, which delivers every event for a given
+runID — combine with `Agent.Run` (or `Agent.RunReplayInto`) in another
+goroutine for live observation.
+
+---
+
+## 8a. `starling/replay`
+
+The replay package powers both `(*Agent).RunReplay` and the
+inspector's replay UI.
 
 ```go
-runID, events, err := agent.Stream(ctx, "Summarize the Go 1.23 release notes.")
-if err != nil { log.Fatal(err) }
-
-for ev := range events {
-    switch ev.Kind {
-    case event.KindAssistantMessageCompleted:
-        fmt.Printf("[turn %s] %s\n", ev.TurnID, ev.Text)
-    case event.KindToolCallScheduled:
-        fmt.Printf("[tool %s] calling %s\n", ev.CallID, ev.Tool)
-    case event.KindBudgetExceeded:
-        fmt.Printf("[!] budget exceeded: %v\n", ev.Err)
-    }
+// Agent is the minimum interface a replay-capable agent must satisfy.
+type Agent interface {
+    RunReplay(ctx context.Context, recorded []event.Event) error
 }
+
+// StreamingAgent additionally exposes the sink-based variant used by
+// Stream below.
+type StreamingAgent interface {
+    Agent
+    RunReplayInto(ctx context.Context, recorded []event.Event, sink eventlog.EventLog) error
+}
+
+// Factory builds a fresh Agent for one replay attempt. Constructed
+// per session so each replay starts from a clean slate.
+type Factory func(ctx context.Context) (Agent, error)
+
+// ReplayStep is one row of the side-by-side timeline produced by Stream.
+type ReplayStep struct {
+    Index            uint64
+    Recorded         event.Event
+    Produced         event.Event
+    Diverged         bool
+    DivergenceReason string
+}
+
+// Stream runs the recorded log under runID through factory's agent and
+// emits one ReplayStep per recorded event. The channel closes when the
+// replay finishes (clean run, divergence, or context cancel).
+func Stream(ctx context.Context, factory Factory, log eventlog.EventLog, runID string) (<-chan ReplayStep, error)
+```
+
+---
+
+## 8b. `starling/inspect`
+
+The inspector ships as a reusable `http.Handler`. The standalone binary
+under `cmd/starling-inspect` is a thin shim around `inspect.New`.
+
+```go
+// New builds the inspector handler. store must also implement
+// eventlog.RunLister; New returns an error otherwise.
+func New(store eventlog.EventLog, opts ...Option) (*Server, error)
+
+type Server struct { /* opaque http.Handler */ }
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request)
+func (s *Server) ReplayEnabled() bool
+
+// WithReplayer wires in a replay.Factory so the inspector can spawn
+// replay sessions on demand. Without it the inspector is read-only
+// and the Replay button is hidden.
+func WithReplayer(factory replay.Factory) Option
 ```
 
 ---

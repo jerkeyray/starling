@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -94,53 +93,50 @@ func (s *replaySession) touch() {
 	s.lastUsed.Store(time.Now().UnixNano())
 }
 
-// dispatchReplay routes inside /run/{id}/replay[/...]. Called only
-// when s.replayer != nil; rest is r.URL.Path with the leading
-// "/run/" stripped.
-func (s *Server) dispatchReplay(w http.ResponseWriter, r *http.Request, rest string) {
-	parts := strings.Split(rest, "/")
-	// rest looks like one of:
-	//   {id}/replay
-	//   {id}/replay/{session}/stream
-	//   {id}/replay/{session}/control
-	if len(parts) < 2 || parts[1] != "replay" {
-		http.NotFound(w, r)
-		return
-	}
-	runID := parts[0]
-	if runID == "" {
-		http.NotFound(w, r)
-		return
-	}
-	switch len(parts) {
-	case 2:
-		// /run/{id}/replay — start
+// dispatchReplaySession routes the per-session replay endpoints.
+// Called by the top-level dispatcher with runID, sessionID, and action
+// already isolated from the URL path. Pre-conditions: s.replayer != nil,
+// runID != "", and the path was matched as /run/{id}/replay/{session}/{action}.
+func (s *Server) dispatchReplaySession(w http.ResponseWriter, r *http.Request, runID, sessionID, action string) {
+	switch action {
+	case "stream":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleReplayStream(w, r, runID, sessionID)
+	case "control":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		s.handleReplayStart(w, r, runID)
-	case 4:
-		sessionID, action := parts[2], parts[3]
-		switch action {
-		case "stream":
-			if r.Method != http.MethodGet {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			s.handleReplayStream(w, r, runID, sessionID)
-		case "control":
-			if r.Method != http.MethodPost {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			s.handleReplayControl(w, r, runID, sessionID)
-		default:
-			http.NotFound(w, r)
-		}
+		s.handleReplayControl(w, r, runID, sessionID)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleReplayPage renders the full-page replay UI (two-column
+// timeline + control bar). The page itself is static; all dynamic
+// behaviour is driven client-side via EventSource on the SSE stream
+// endpoint. The handler does not start a session — the page does
+// that on load via fetch(POST /replay) — so a refresh always lands
+// on a fresh session and the previous one is GC'd within 60s.
+func (s *Server) handleReplayPage(w http.ResponseWriter, r *http.Request, runID string) {
+	events, err := s.store.Read(r.Context(), runID)
+	if err != nil {
+		http.Error(w, "read run: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(events) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	s.tpl.render(w, "replay.html", http.StatusOK, map[string]any{
+		"Title":      "Replay " + runID,
+		"RunID":      runID,
+		"EventCount": len(events),
+	})
 }
 
 // handleReplayStart constructs a new session and returns its id as

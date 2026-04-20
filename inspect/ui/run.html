@@ -4,12 +4,17 @@
     <h1>Run <span class="runid-mono">{{.RunID}}</span></h1>
     <p class="run-meta">{{len .Rows}} events</p>
   </div>
-  {{with .Validation}}
-  <div class="validation">
-    <span class="badge badge-{{.Class}}">{{if .OK}}✓{{else}}✗{{end}} {{.Label}}</span>
-    {{if .Reason}}<p class="validation-reason">{{.Reason}}</p>{{end}}
+  <div class="run-head-right">
+    {{if .ReplayEnabled}}
+    <a class="btn btn-replay" href="/run/{{runPath .RunID}}/replay">▶ Replay</a>
+    {{end}}
+    {{with .Validation}}
+    <div class="validation">
+      <span class="badge badge-{{.Class}}">{{if .OK}}✓{{else}}✗{{end}} {{.Label}}</span>
+      {{if .Reason}}<p class="validation-reason">{{.Reason}}</p>{{end}}
+    </div>
+    {{end}}
   </div>
-  {{end}}
 </header>
 
 <section class="run-pane">

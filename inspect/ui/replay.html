@@ -1,0 +1,45 @@
+{{define "content"}}
+<header class="replay-head">
+  <div>
+    <h1>Replay <span class="runid-mono">{{.RunID}}</span></h1>
+    <p class="run-meta">
+      <span id="replay-progress">0</span> / {{.EventCount}} steps
+      · <span id="replay-status" class="status status-init">starting…</span>
+    </p>
+  </div>
+  <div class="replay-controls">
+    <button id="ctl-pause"   type="button" class="btn"               disabled>⏸ pause</button>
+    <button id="ctl-step"    type="button" class="btn" data-needs-pause disabled>⏭ step</button>
+    <button id="ctl-resume"  type="button" class="btn" data-needs-pause disabled>▶ resume</button>
+    <button id="ctl-restart" type="button" class="btn"               disabled>🔄 restart</button>
+    <a class="btn" href="/run/{{runPath .RunID}}">← back</a>
+  </div>
+</header>
+
+<section class="replay-pane">
+  <div class="replay-col">
+    <h2>Recorded</h2>
+    <ol id="recorded-list" class="replay-list"></ol>
+  </div>
+  <div class="replay-col">
+    <h2>Produced</h2>
+    <ol id="produced-list" class="replay-list"></ol>
+  </div>
+</section>
+
+<dialog id="diverge-dialog">
+  <header><strong>Divergence</strong> at step <span id="dd-index"></span></header>
+  <pre id="dd-reason"></pre>
+  <form method="dialog"><button class="btn">close</button></form>
+</dialog>
+
+<script>
+  // Inline bootstrap so the replay page is self-contained: knows the
+  // runID and shape of the recording, then hands off to replay.js.
+  window.STARLING_REPLAY = {
+    runID:     {{.RunID}},
+    eventCount: {{.EventCount}},
+  };
+</script>
+<script src="/static/replay.js" defer></script>
+{{end}}

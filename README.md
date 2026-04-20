@@ -19,7 +19,7 @@ which means every execution is:
 go get github.com/jerkeyray/starling
 ```
 
-Requires Go 1.23+.
+Requires Go 1.26+.
 
 ## Hello agent
 

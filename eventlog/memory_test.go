@@ -238,6 +238,50 @@ func TestStream_ReplayThenLive(t *testing.T) {
 	}
 }
 
+// TestStream_LongHistoryNotTruncated guards against a regression where
+// runs longer than streamBufferSize were silently truncated to the
+// first N events and the channel closed. The replay/inspector use
+// case is exactly long-run streaming, so this must deliver every event.
+func TestStream_LongHistoryNotTruncated(t *testing.T) {
+	log := eventlog.NewInMemory()
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const total = 600 // > streamBufferSize (256)
+	var cb chainBuilder
+	for i := 0; i < total; i++ {
+		ev := cb.next(t, "r1", fmt.Sprintf("hist-%d", i))
+		if err := log.Append(ctx, "r1", ev); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	ch, err := log.Stream(ctx, "r1")
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	got := make([]uint64, 0, total)
+	timeout := time.After(5 * time.Second)
+	for len(got) < total {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				t.Fatalf("channel closed after %d/%d events", len(got), total)
+			}
+			got = append(got, ev.Seq)
+		case <-timeout:
+			t.Fatalf("timeout: only got %d/%d events", len(got), total)
+		}
+	}
+	for i, seq := range got {
+		if seq != uint64(i+1) {
+			t.Fatalf("got[%d]: Seq=%d, want %d", i, seq, i+1)
+		}
+	}
+}
+
 func TestStream_ContextCancelClosesChannel(t *testing.T) {
 	log := eventlog.NewInMemory()
 	defer log.Close()

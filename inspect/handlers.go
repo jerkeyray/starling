@@ -3,7 +3,6 @@ package inspect
 import (
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/jerkeyray/starling/eventlog"
 )
@@ -46,9 +45,12 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 // inline; the badge at the top reflects eventlog.Validate's verdict.
 //
 // URL: /run/{runID}
-func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
-	runID := strings.TrimPrefix(r.URL.Path, "/run/")
-	if runID == "" || strings.Contains(runID, "/") {
+//
+// runID may itself contain "/" (e.g., Namespace + "/" + ULID); the
+// dispatcher in server.go has already isolated it from any suffix
+// segments and URL-unescaped it.
+func (s *Server) handleRun(w http.ResponseWriter, r *http.Request, runID string) {
+	if runID == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -71,11 +73,12 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	initial := detailFromEvent(runID, events[0])
 
 	s.tpl.render(w, "run.html", http.StatusOK, map[string]any{
-		"Title":      "Run " + runID,
-		"RunID":      runID,
-		"Rows":       rows,
-		"Validation": validation,
-		"Initial":    initial,
+		"Title":         "Run " + runID,
+		"RunID":         runID,
+		"Rows":          rows,
+		"Validation":    validation,
+		"Initial":       initial,
+		"ReplayEnabled": s.ReplayEnabled(),
 	})
 }
 
@@ -83,15 +86,15 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 // Designed for HTMX hx-get; not a full page (no layout).
 //
 // URL: /run/{runID}/event/{seq}
-func (s *Server) handleEventDetail(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/run/")
-	parts := strings.SplitN(rest, "/event/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+//
+// runID and seqStr come pre-parsed from the dispatcher (runID may
+// contain "/" for namespaced runs).
+func (s *Server) handleEventDetail(w http.ResponseWriter, r *http.Request, runID, seqStr string) {
+	if runID == "" || seqStr == "" {
 		http.NotFound(w, r)
 		return
 	}
-	runID := parts[0]
-	seq, err := strconv.ParseUint(parts[1], 10, 64)
+	seq, err := strconv.ParseUint(seqStr, 10, 64)
 	if err != nil || seq == 0 {
 		http.NotFound(w, r)
 		return

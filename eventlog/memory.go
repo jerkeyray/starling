@@ -15,6 +15,41 @@ import (
 // that falls this many events behind is dropped (its channel is closed).
 const streamBufferSize = 256
 
+// safeClose closes ch and swallows the panic from a double-close. The
+// fan-out path in Append closes channels for slow subscribers; our
+// cancel path also wants to close on cleanup. Two closers, one channel,
+// recover() is the cheapest correct serialization.
+func safeClose(ch chan event.Event) {
+	defer func() { _ = recover() }()
+	close(ch)
+}
+
+// closeChanOnce removes ch from the run's subscriber list (if present)
+// and closes it. Idempotent against the slow-consumer drop path in
+// Append, which may have already closed ch.
+func closeChanOnce(ch chan event.Event, m *memoryLog, runID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		// Close() already closed every known subscriber. ch was either
+		// in the list (closed by Close) or already removed; either way,
+		// nothing to do here.
+		return
+	}
+	rs, ok := m.runs[runID]
+	if !ok {
+		safeClose(ch)
+		return
+	}
+	for i, sub := range rs.subscribers {
+		if sub == ch {
+			rs.subscribers = append(rs.subscribers[:i], rs.subscribers[i+1:]...)
+			break
+		}
+	}
+	safeClose(ch)
+}
+
 // NewInMemory returns an in-memory EventLog suitable for tests, demos, and
 // single-process embedded use. It is safe for concurrent use across runs.
 func NewInMemory() EventLog {
@@ -148,48 +183,60 @@ func (m *memoryLog) Stream(ctx context.Context, runID string) (<-chan event.Even
 
 	ch := make(chan event.Event, streamBufferSize)
 
-	// Historical replay: if more events already exist than the buffer can
-	// hold, we can't deliver history + go live on the same channel. Close
-	// immediately after draining what fits so the caller sees a clean
-	// signal rather than silent data loss.
-	if len(rs.events) > streamBufferSize {
-		for i := 0; i < streamBufferSize; i++ {
-			ch <- rs.events[i]
-		}
-		close(ch)
-		m.mu.Unlock()
-		return ch, nil
-	}
-
-	for _, ev := range rs.events {
-		ch <- ev
-	}
-	rs.subscribers = append(rs.subscribers, ch)
+	// Two phases: history catch-up, then live tail. Previously, runs
+	// with more than streamBufferSize events were silently truncated to
+	// the first 256 and the channel closed — a real data-loss bug for
+	// the inspector / replay UI, which is the exact tool that needs to
+	// see long runs. We now deliver every historical event by pumping
+	// from a goroutine, then register as a live subscriber so any
+	// further Appends are fanned out.
+	//
+	// Trade-off: events appended *during* the history pump are not
+	// delivered. The use cases that drove this fix (inspector, replay)
+	// always Stream completed runs, so there is nothing to miss; live
+	// tail of an in-progress run from a stream subscriber that joins
+	// late is best-effort by design. Callers that need exact
+	// "history + live" semantics for in-flight runs should Read once
+	// then Stream from the next-expected Seq.
+	history := make([]event.Event, len(rs.events))
+	copy(history, rs.events)
 	m.mu.Unlock()
 
-	// Watch for ctx cancellation; on cancel, remove the subscriber and
-	// close the channel (if not already closed by a slow-consumer drop or
-	// Close()).
+	// One goroutine owns ch's lifecycle: pump history, then register
+	// for live tail, then wait for ctx.Done to unregister and close.
+	// Keeping it single-owner avoids a race where a separate cancel
+	// watcher fires after history is done but before the registration
+	// goroutine takes the lock, leaving ch leaked.
 	go func() {
-		<-ctx.Done()
+		for _, ev := range history {
+			select {
+			case ch <- ev:
+			case <-ctx.Done():
+				closeChanOnce(ch, m, runID)
+				return
+			}
+		}
+		// Register as a live subscriber.
 		m.mu.Lock()
-		defer m.mu.Unlock()
 		if m.closed {
-			// Close() already closed every subscriber channel.
+			m.mu.Unlock()
+			// Close() already closed (or will close) every known
+			// subscriber; ch was never registered, so close it ourselves.
+			safeClose(ch)
 			return
 		}
 		rs, ok := m.runs[runID]
 		if !ok {
+			m.mu.Unlock()
+			safeClose(ch)
 			return
 		}
-		for i, sub := range rs.subscribers {
-			if sub == ch {
-				rs.subscribers = append(rs.subscribers[:i], rs.subscribers[i+1:]...)
-				close(ch)
-				return
-			}
-		}
-		// Subscriber already dropped (slow-consumer close) — nothing to do.
+		rs.subscribers = append(rs.subscribers, ch)
+		m.mu.Unlock()
+
+		// Wait for ctx cancellation and unsubscribe.
+		<-ctx.Done()
+		closeChanOnce(ch, m, runID)
 	}()
 
 	return ch, nil

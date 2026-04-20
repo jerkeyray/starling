@@ -16,6 +16,7 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -108,25 +109,74 @@ func (s *Server) routes() {
 //
 //	GET  /run/{id}                                  → handleRun (view)
 //	GET  /run/{id}/event/{seq}                      → handleEventDetail (HTMX)
+//	GET  /run/{id}/replay                           → handleReplayPage   (T44)
 //	POST /run/{id}/replay                           → handleReplayStart  (T43)
 //	GET  /run/{id}/replay/{session}/stream          → handleReplayStream (SSE, T43)
 //	POST /run/{id}/replay/{session}/control         → handleReplayControl (T43)
 //
-// Replay routes 404 when no Replayer is configured.
+// {id} may itself contain "/" (Namespace + "/" + ULID), so the
+// dispatcher peels known suffixes from the right rather than splitting
+// on the first slash. Replay routes 404 when no Replayer is configured.
 func (s *Server) dispatchRun(w http.ResponseWriter, r *http.Request) {
-	rest := r.URL.Path[len("/run/"):]
-	switch {
-	case strings.Contains(rest, "/event/"):
-		s.handleEventDetail(w, r)
-	case strings.Contains(rest, "/replay"):
+	rest, err := url.PathUnescape(r.URL.Path[len("/run/"):])
+	if err != nil || rest == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	// /run/{id}/event/{seq}
+	if i := strings.LastIndex(rest, "/event/"); i >= 0 {
+		runID := rest[:i]
+		seqStr := rest[i+len("/event/"):]
+		if runID == "" || seqStr == "" || strings.Contains(seqStr, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		s.handleEventDetail(w, r, runID, seqStr)
+		return
+	}
+
+	// /run/{id}/replay/{session}/{action}
+	if i := strings.LastIndex(rest, "/replay/"); i >= 0 {
 		if s.replayer == nil {
 			http.NotFound(w, r)
 			return
 		}
-		s.dispatchReplay(w, r, rest)
-	default:
-		s.handleRun(w, r)
+		runID := rest[:i]
+		tail := rest[i+len("/replay/"):]
+		parts := strings.Split(tail, "/")
+		if runID == "" || len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
+		s.dispatchReplaySession(w, r, runID, parts[0], parts[1])
+		return
 	}
+
+	// /run/{id}/replay
+	if strings.HasSuffix(rest, "/replay") {
+		if s.replayer == nil {
+			http.NotFound(w, r)
+			return
+		}
+		runID := rest[:len(rest)-len("/replay")]
+		if runID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			s.handleReplayPage(w, r, runID)
+		case http.MethodPost:
+			s.handleReplayStart(w, r, runID)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	// /run/{id}
+	s.handleRun(w, r, rest)
 }
 
 // ServeHTTP implements http.Handler.

@@ -33,7 +33,7 @@
   <tbody id="runs-body">
     {{range .Rows}}
     <tr data-runid="{{.RunID}}">
-      <td><a href="/run/{{.RunID}}" class="runid">{{.RunID}}</a></td>
+      <td><a href="/run/{{runPath .RunID}}" class="runid">{{.RunID}}</a></td>
       <td><time datetime="{{.StartedISO}}">{{.Started}}</time></td>
       <td class="num">{{.EventCount}}</td>
       <td><span class="badge badge-{{.StatusClass}}">{{.StatusLabel}}</span></td>

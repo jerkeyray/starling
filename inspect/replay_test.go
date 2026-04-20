@@ -330,6 +330,52 @@ func TestReplay_SessionMaxRejects(t *testing.T) {
 	}
 }
 
+// TestRoutes_NamespacedRunID exercises every public route with a runID
+// that itself contains "/" (Agent.Namespace + "/" + ULID). Regression
+// guard for a class of bugs where the dispatcher rejected slashes in
+// the runID and made the inspector unusable for multi-tenant deployments.
+func TestRoutes_NamespacedRunID(t *testing.T) {
+	const runID = "tenant-a/01HZZZZZZZZZZZZZZZZZZZZZZZ"
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { log.Close() })
+	seedReplayLog(t, log, runID)
+
+	srv, err := New(log, WithReplayer(func(_ context.Context) (replay.Agent, error) {
+		return &fakeStreamingAgent{emitN: -1}, nil
+	}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	hs := httptest.NewServer(srv)
+	t.Cleanup(hs.Close)
+
+	// Path-encode the slash so the URL is well-formed; the dispatcher
+	// PathUnescapes once before route matching.
+	encoded := strings.ReplaceAll(runID, "/", "%2F")
+
+	for _, tc := range []struct {
+		name, method, path string
+		want               int
+	}{
+		{"detail page", "GET", "/run/" + encoded, http.StatusOK},
+		{"event detail", "GET", "/run/" + encoded + "/event/1", http.StatusOK},
+		{"replay page", "GET", "/run/" + encoded + "/replay", http.StatusOK},
+		{"replay start", "POST", "/run/" + encoded + "/replay", http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, _ := http.NewRequest(tc.method, hs.URL+tc.path, nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != tc.want {
+				t.Fatalf("%s %s = %d, want %d", tc.method, tc.path, resp.StatusCode, tc.want)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------
 // helpers
 // ----------------------------------------------------------------------

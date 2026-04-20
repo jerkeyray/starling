@@ -1,5 +1,6 @@
 // Package eventlog defines the EventLog interface and ships the default
-// backends: in-memory, SQLite, and Postgres.
+// backends: in-memory and SQLite. A Postgres backend is on the roadmap
+// but not yet implemented.
 package eventlog
 
 import (

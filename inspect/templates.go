@@ -6,7 +6,27 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 )
+
+// templateFuncs is the FuncMap shared across every parsed template.
+// Keep this small: complex logic belongs in Go view models, not in
+// the template itself.
+var templateFuncs = template.FuncMap{
+	// runPath URL-escapes a runID for use as a path segment in inspector
+	// links. Namespaced runIDs are "ns/ULID" — we preserve the slash so
+	// the URL keeps its hierarchical shape, but escape every other byte
+	// per RFC 3986 path-segment rules. Without this, a namespace
+	// containing "?", "#", or " " would silently break links.
+	"runPath": func(runID string) string {
+		segs := strings.Split(runID, "/")
+		for i, s := range segs {
+			segs[i] = url.PathEscape(s)
+		}
+		return strings.Join(segs, "/")
+	},
+}
 
 // templates holds every parsed template under ui/*.html. Page
 // templates are wrapped in the shared layout; partial templates
@@ -28,6 +48,7 @@ func mustParseTemplates(fsys embed.FS) *templates {
 	pages := []string{
 		"ui/runs.html",
 		"ui/run.html",
+		"ui/replay.html",
 	}
 	partials := []string{
 		"ui/event_detail.html",
@@ -39,7 +60,7 @@ func mustParseTemplates(fsys embed.FS) *templates {
 		// partials via {{template "name" .}} (e.g. run.html pre-renders
 		// the first event-detail panel using event_detail.html).
 		paths := append([]string{layoutPath, p}, partials...)
-		t, err := template.New("layout.html").ParseFS(fsys, paths...)
+		t, err := template.New("layout.html").Funcs(templateFuncs).ParseFS(fsys, paths...)
 		if err != nil {
 			panic(fmt.Sprintf("parse %s: %v", p, err))
 		}
@@ -47,7 +68,7 @@ func mustParseTemplates(fsys embed.FS) *templates {
 	}
 	partTpls := make(map[string]*template.Template, len(partials))
 	for _, p := range partials {
-		t, err := template.New(basename(p)).ParseFS(fsys, p)
+		t, err := template.New(basename(p)).Funcs(templateFuncs).ParseFS(fsys, p)
 		if err != nil {
 			panic(fmt.Sprintf("parse partial %s: %v", p, err))
 		}

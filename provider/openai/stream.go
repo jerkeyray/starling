@@ -104,13 +104,18 @@ func (s *openaiStream) handleChunk(chunk oai.ChatCompletionChunk) {
 		_, _ = s.rawHash.Write([]byte(raw))
 	}
 
-	// Terminal usage chunk: empty Choices + populated Usage.
+	// Terminal usage chunk: empty Choices + populated Usage. We accept
+	// any chunk that reports a positive prompt or completion count;
+	// some OpenAI-compatible backends omit total_tokens but still
+	// populate the breakdown, and gating purely on TotalTokens would
+	// silently drop their accounting.
 	if len(chunk.Choices) == 0 {
-		if chunk.Usage.TotalTokens > 0 {
+		u := chunk.Usage
+		if u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0 {
 			s.finalUsage = &provider.UsageUpdate{
-				InputTokens:     chunk.Usage.PromptTokens,
-				OutputTokens:    chunk.Usage.CompletionTokens,
-				CacheReadTokens: chunk.Usage.PromptTokensDetails.CachedTokens,
+				InputTokens:     u.PromptTokens,
+				OutputTokens:    u.CompletionTokens,
+				CacheReadTokens: u.PromptTokensDetails.CachedTokens,
 			}
 		}
 		return
