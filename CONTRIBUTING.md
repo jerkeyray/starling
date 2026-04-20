@@ -21,14 +21,17 @@ and the bar for new surface area is high. Read this before opening a PR.
 ## Dev loop
 
 ```
-go build ./...
-go vet ./...
-go test -race -count=1 ./...
+make check
 ```
 
-All three must pass before a PR is mergeable. Add `-count=10` on the
-package you touched if it involves concurrency — `-count=1` has masked
-races before.
+That target runs `go vet`, a `gofmt` drift check, `golangci-lint`,
+`govulncheck`, and `go test -race -count=10 ./...`. CI runs the same
+set plus a Go version matrix (`stable` and the pinned floor in
+`go.mod`) and the Postgres backend matrix.
+
+`make check` must pass before a PR is mergeable. If your change is
+concurrency-heavy, bump the race count further on the package you
+touched — `-count=1` has masked real races in this repo before.
 
 ## Style
 

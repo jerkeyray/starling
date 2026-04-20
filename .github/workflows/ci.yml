@@ -7,17 +7,67 @@ on:
 
 jobs:
   # Base job: in-memory + SQLite tests, no external services.
+  # Matrixed across `stable` (track the ecosystem) and the pinned
+  # floor in go.mod (catch toolchain-sensitive breakage early).
   test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['stable', '1.26.2']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go mod download
+      - run: go vet ./...
+      - run: go build ./...
+      # -count=10 surfaces races the single-count default has missed
+      # in this repo before. Suite runs in ~8s locally; 10× fits well
+      # under a minute on a CI runner.
+      - run: go test -race -count=10 ./...
+
+  # golangci-lint — conservative set configured in .golangci.yml.
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
-      - run: go mod download
-      - run: go vet ./...
-      - run: go build ./...
-      - run: go test -race ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62.2
+
+  # govulncheck — reachability-aware scan of stdlib + deps.
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+
+  # gofmt drift guard. Double-covered by golangci-lint's gofmt linter
+  # but kept as a separate one-liner so failures are obvious.
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - name: gofmt -l
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "The following files are not gofmt-clean:"
+            echo "$out"
+            exit 1
+          fi
 
   # Postgres matrix: runs only the eventlog package's tests, once per
   # supported Postgres major version. The PG_EVENTLOG_TEST env var

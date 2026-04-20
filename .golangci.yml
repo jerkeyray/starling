@@ -1,0 +1,61 @@
+# golangci-lint configuration.
+#
+# Conservative linter set — enough to catch the classes of drift this
+# repo has actually suffered (gofmt drift, swallowed errors, stale
+# docstrings on exported API), without churning the codebase on
+# opinionated style rules.
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - gosec
+    - revive
+    - gofmt
+    - goimports
+    - unused
+    - ineffassign
+    - misspell
+
+linters-settings:
+  revive:
+    # Light config: keep the exported-doc rule (catches future API
+    # drift) but turn off unused-parameter (too noisy for interface
+    # implementations).
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+      - name: unused-parameter
+        disabled: true
+      - name: package-comments
+        disabled: true
+  gosec:
+    excludes:
+      # G104 overlaps with errcheck; let errcheck own it.
+      - G104
+  misspell:
+    locale: US
+
+issues:
+  exclude-dirs:
+    - examples
+    - internal
+  exclude-rules:
+    # Test helpers don't need godoc on every exported symbol.
+    - path: _test\.go
+      linters:
+        - revive
+      text: "exported"
+    # Fuzz/bench scaffolding sometimes has intentionally-ignored errs.
+    - path: _test\.go
+      linters:
+        - errcheck
+  max-issues-per-linter: 0
+  max-same-issues: 0
