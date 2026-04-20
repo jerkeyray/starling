@@ -696,6 +696,45 @@ func (s *Server) ReplayEnabled() bool
 func WithReplayer(factory replay.Factory) Option
 ```
 
+### 8b.1 Dual-mode CLI helper (root package)
+
+Most users don't instantiate `inspect.New` directly — they embed the
+inspector as a subcommand of their own agent binary so the *same*
+factory that builds the runtime agent is available for replay:
+
+```go
+// InspectCommand returns a CLI-style entrypoint. factory may be nil,
+// in which case the inspector runs read-only (no Replay button).
+func InspectCommand(factory replay.Factory) *InspectCmd
+
+type InspectCmd struct {
+    Factory replay.Factory // nil = view-only
+    Name    string         // used in usage/error messages; default "inspect"
+    Output  io.Writer      // logs + flag errors; default os.Stderr
+}
+
+// Run parses args, opens the log read-only, starts the HTTP server
+// on --addr (default 127.0.0.1:0), optionally opens the browser
+// (--no-open to skip), and blocks until SIGINT/SIGTERM.
+func (c *InspectCmd) Run(args []string) error
+```
+
+Minimal dual-mode wiring:
+
+```go
+if len(os.Args) > 1 && os.Args[1] == "inspect" {
+    cmd := starling.InspectCommand(replay.Factory(buildAgent))
+    if err := cmd.Run(os.Args[2:]); err != nil {
+        log.Fatal(err)
+    }
+    return
+}
+// ... normal run path ...
+```
+
+See `examples/m1_hello` for a complete working binary and
+`docs/REPLAY_DEBUGGING.md` for the workflow.
+
 ---
 
 ## 9. Design constraints reflected in the API

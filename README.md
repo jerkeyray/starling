@@ -2,16 +2,23 @@
 
 **Status:** pre-release. Public API is unstable.
 
-Starling is an event-sourced agent runtime for Go. Every agent run is
-recorded as an append-only, BLAKE3-chained, Merkle-rooted event log,
-which means every execution is:
+Starling is a **debuggable** event-sourced agent runtime for Go.
+Every agent run is recorded as an append-only, BLAKE3-chained,
+Merkle-rooted event log, which means every execution is:
 
 - **Replayable** — re-run a goal byte-for-byte from the log and catch
-  any drift as `ErrNonDeterminism`.
+  any drift as `ErrNonDeterminism`. When you ship the inspector in
+  your own binary, you can click Replay in the browser and watch the
+  recorded and re-executed event streams side-by-side.
 - **Auditable** — tamper with any prior event and the Merkle root in
   the terminal event no longer matches.
 - **Cost-enforceable** — input tokens, output tokens, USD, and
   wall-clock budgets all enforced inline and recorded in the log.
+
+Your agent failed in production. Open the event log in the inspector,
+click Replay, and you see the exact step where today's behaviour
+diverged from last week's. See
+[`docs/REPLAY_DEBUGGING.md`](./docs/REPLAY_DEBUGGING.md).
 
 ## Install
 
@@ -220,25 +227,41 @@ Observability & multi-tenant:
 
 ## Inspector
 
-`starling-inspect` is a single binary that opens a SQLite event log
-read-only and serves a self-contained web UI on localhost: runs list,
-event timeline, per-event detail, and a hash-chain validation badge.
-No CDN, no JS build step, no auth (loopback only by default).
+A self-contained web UI for browsing event logs: runs list, event
+timeline, per-event detail, a hash-chain validation badge, and —
+when you wire it into your own binary — replay-from-UI with the
+recorded and re-executed streams rendered side-by-side. No CDN, no
+JS build step, no auth (loopback only by default).
+
+**View-only** — install the standalone binary, point it at a SQLite
+log:
 
 ```sh
 go install github.com/jerkeyray/starling/cmd/starling-inspect@latest
 starling-inspect /path/to/runs.db
 ```
 
-Or, with no API keys and no real run, the one-command demo:
+**Full mode (replay enabled)** — embed `starling.InspectCommand` in
+your own agent binary and pass a factory that builds your
+`*starling.Agent`. Because the factory is the same function that
+built the original run, replay stays faithful. See
+[`examples/m1_hello`](./examples/m1_hello) for a working dual-mode
+binary:
+
+```sh
+OPENAI_API_KEY=sk-... go run ./examples/m1_hello run
+go run ./examples/m1_hello inspect ./runs.db
+```
+
+Or the no-API-key demo:
 
 ```sh
 make demo-inspect
 ```
 
-See [`docs/INSPECT.md`](./docs/INSPECT.md) for flags, the security
-model (read-only by construction, localhost-only by default), and
-what's deferred to M5.
+See [`docs/INSPECT.md`](./docs/INSPECT.md) for flags and the
+security model, and [`docs/REPLAY_DEBUGGING.md`](./docs/REPLAY_DEBUGGING.md)
+for the debugging workflow.
 
 ## Observability
 
@@ -256,6 +279,7 @@ picture and §6.2 for the synchronous-write / backpressure contract.
 - [`docs/DECISIONS.md`](./docs/DECISIONS.md) — design decisions (ADR-style)
 - [`docs/EVENTS.md`](./docs/EVENTS.md) — event schema + CBOR wire format
 - [`docs/REPLAY.md`](./docs/REPLAY.md) — replay cookbook
+- [`docs/REPLAY_DEBUGGING.md`](./docs/REPLAY_DEBUGGING.md) — debugging failed runs with replay + inspector
 - [`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md) — provider feature matrix
 - [`docs/INSPECT.md`](./docs/INSPECT.md) — `starling-inspect` web inspector
 

@@ -1,4 +1,4 @@
-package main
+package starling
 
 import (
 	"net"
@@ -24,8 +24,7 @@ func TestBrowserURL(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			addr := stringAddr(tc.in)
-			got := browserURL(addr)
+			got := browserURL(stringAddr(tc.in))
 			if got != tc.want {
 				t.Errorf("browserURL(%q) = %q, want %q", tc.in, got, tc.want)
 			}

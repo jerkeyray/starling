@@ -1,15 +1,29 @@
-# `starling-inspect` — local web inspector
+# Starling inspector — local web UI
 
-`starling-inspect` is a single Go binary that opens a Starling SQLite
-event log read-only and serves a self-contained web UI on localhost
-for browsing runs, walking the event timeline, inspecting payloads,
-and seeing whether the hash chain validates.
+The inspector opens a Starling event log and serves a self-contained
+web UI on localhost for browsing runs, walking the event timeline,
+inspecting payloads, seeing whether the hash chain validates, and
+(optionally) replaying a run side-by-side against your current agent
+configuration.
 
 It exists because once a run has more than ~50 events, the CLI dump
-stops fitting in a terminal. The UI is intentionally pprof-shaped:
-runs list → event timeline → detail pane → validation badge. No
-auth, no telemetry, no CDN; HTMX is vendored, CSS is hand-rolled,
-templates ship in the binary via `go:embed`.
+stops fitting in a terminal. The UI is pprof-shaped: runs list →
+event timeline → detail pane → validation badge. No telemetry, no
+CDN; HTMX is vendored, CSS is hand-rolled, templates ship in the
+binary via `go:embed`.
+
+There are two ways to run it:
+
+| Mode | Replay-from-UI | How |
+|---|---|---|
+| **View-only** | No (button hidden) | `starling-inspect path/to/runs.db` |
+| **Full (replay enabled)** | Yes | Embed `starling.InspectCommand(factory)` in your own binary and pass a factory that builds your `*starling.Agent` |
+
+View-only mode is the right default for "poke around my audit log."
+Full mode is how you use the replay differentiator — the inspector
+calls your factory, builds a fresh agent, and streams its events
+alongside the recording so you can see exactly where behaviour
+diverged.
 
 ## Install
 
@@ -125,37 +139,75 @@ beyond `localhost`.
   writing to the same DB stays correct: the inspector sees new rows
   on the next read. Pinned by `TestSQLite_ReadOnly_SeesLiveWrites`.
 
-## What's intentionally missing in M4
+## Full mode: replay from your own binary
+
+The standalone `starling-inspect` binary cannot replay, because
+replay needs to construct your `*starling.Agent` — same `Provider`,
+same `Tools`, same `Config` — and the binary has no way to know
+your agent wiring. Dual-mode solves this: you add an `inspect`
+subcommand to your own agent binary, wire `starling.InspectCommand`
+with a factory that builds your agent, and the inspector calls back
+into your factory when the user clicks Replay.
+
+Minimal skeleton (full working version in `examples/m1_hello`):
+
+```go
+func main() {
+    if len(os.Args) > 1 && os.Args[1] == "inspect" {
+        factory := replay.Factory(func(ctx context.Context) (replay.Agent, error) {
+            return buildAgent(ctx) // same function the run path uses
+        })
+        cmd := starling.InspectCommand(factory)
+        if err := cmd.Run(os.Args[2:]); err != nil {
+            log.Fatal(err)
+        }
+        return
+    }
+    // ... normal agent run ...
+}
+```
+
+The whole thesis: the factory is literally the same function that
+built the original run. That's what keeps replay faithful.
+
+Try it:
+
+```sh
+OPENAI_API_KEY=sk-... go run ./examples/m1_hello run
+go run ./examples/m1_hello inspect ./runs.db
+```
+
+## What's intentionally missing
 
 | | Why |
 |---|---|
-| Replay-from-UI | Needs the user's `Agent` factory; unsolved UX. The Go API `(*Agent).Replay` exists for users who script it. M5+. |
 | Live tail of in-progress runs | The current page is a snapshot. Server-Sent Events on top of `eventlog.Stream` is straightforward; deferred until a real user asks. |
 | Authentication / TLS | Localhost developer tool by design. Use a reverse proxy. |
-| Hash-chain visualization | The validation badge + one-line reason covers the operator workflow. Full visualization is M5+ if demand surfaces. |
+| Hash-chain visualization | The validation badge + one-line reason covers the operator workflow. Full visualization if demand surfaces. |
 | Static export (`starling-inspect export ./out/`) | Cool for postmortems, deferred. |
 
 ## Architecture notes
 
 For anyone hacking on the inspector:
 
-- `cmd/starling-inspect/main.go` — flag parsing, listener, signal-driven shutdown.
-- `cmd/starling-inspect/server.go` — `//go:embed ui` + route table.
-- `cmd/starling-inspect/handlers.go` — HTTP handlers, all thin.
-- `cmd/starling-inspect/view.go` — pure-function view models. No HTTP, no IO. Most behavior lives here and is unit-tested.
-- `cmd/starling-inspect/templates.go` — `html/template` parsing; pages share `ui/layout.html`, partials (HTMX swaps) parse standalone.
-- `cmd/starling-inspect/ui/` — every embedded asset.
+- `cmd/starling-inspect/main.go` — thin shim; calls `starling.InspectCommand(nil)`.
+- `inspect_command.go` (root package) — `InspectCommand` / `InspectCmd`: flag parsing, listener, browser-open, signal-driven shutdown. Also exposed as a library entrypoint for dual-mode binaries.
+- `inspect/server.go` — `//go:embed ui` + route table + suffix-aware dispatcher (runIDs may contain `/` from namespaces).
+- `inspect/handlers.go` — HTTP handlers for runs list, run detail, event detail.
+- `inspect/replay.go` — replay session lifecycle + SSE streaming.
+- `inspect/view.go` — pure-function view models. No HTTP, no IO. Most behavior lives here and is unit-tested.
+- `inspect/templates.go` — `html/template` parsing with a `runPath` FuncMap for per-segment URL escaping; pages share `ui/layout.html`, partials parse standalone.
+- `inspect/ui/` — every embedded asset (HTML templates, CSS, vendored HTMX).
 
 Tests:
 
 ```sh
-go test -race ./cmd/starling-inspect/...
+go test -race ./inspect/... .
 ```
 
-Covers the wildcard-URL normalization (`browserURL`), and the pure-
-function view layer (`statusOf`, `kindFamily`, `summarize`,
-`validationFromError`, `shortHex`, `filterByStatus`,
-`rowsFromSummaries`, `rowsFromEvents`).
+Covers the wildcard-URL normalization (`browserURL`), namespaced-run
+routing, the pure-function view layer, and replay session
+lifecycle.
 
 The read-only SQLite contract is pinned in
 `eventlog/sqlite_test.go` (`TestSQLite_ReadOnly_SeesLiveWrites`,

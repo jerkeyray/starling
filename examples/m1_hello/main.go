@@ -1,21 +1,33 @@
-// Command m1_hello is the M1 end-to-end smoke demo. It builds an Agent
-// with one tool (current_time), points it at an LLM provider, and
-// prints the resulting RunResult plus a one-line dump of the event log.
+// Command m1_hello is Starling's end-to-end demo. It builds an Agent
+// with one tool (current_time), points it at an LLM provider, and —
+// depending on the subcommand — either runs the agent or opens the
+// inspector with replay wired up.
 //
-// Usage (OpenAI default):
+// Two modes:
 //
-//	OPENAI_API_KEY=sk-... go run ./examples/m1_hello
+//	# Run the agent; events are written to the SQLite db.
+//	OPENAI_API_KEY=sk-... go run ./examples/m1_hello run
 //
-// Anthropic variant:
+//	# Open the inspector on the db. Clicking "Replay" on a run
+//	# re-executes the recorded turn sequence against this binary's
+//	# Agent construction, so recorded and produced events can be
+//	# diffed side-by-side.
+//	go run ./examples/m1_hello inspect ./runs.db
 //
-//	PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... go run ./examples/m1_hello
+// The two commands share the SAME buildAgent function: that's the
+// whole point of dual-mode — the inspector uses your real agent
+// factory as its replay factory, so what you debug is what you ran.
 //
-// Groq variant (OpenAI-compatible, same binary):
+// Provider selection:
+//
+//	PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... go run ./examples/m1_hello run
+//
+// Groq / OpenAI-compatible:
 //
 //	OPENAI_API_KEY=$GROQ_API_KEY \
 //	OPENAI_BASE_URL=https://api.groq.com/openai/v1 \
 //	MODEL=llama-3.1-8b-instant \
-//	  go run ./examples/m1_hello
+//	  go run ./examples/m1_hello run
 package main
 
 import (
@@ -31,8 +43,14 @@ import (
 	"github.com/jerkeyray/starling/provider"
 	"github.com/jerkeyray/starling/provider/anthropic"
 	"github.com/jerkeyray/starling/provider/openai"
+	"github.com/jerkeyray/starling/replay"
 	"github.com/jerkeyray/starling/tool"
 )
+
+// defaultDB is where "run" writes and where "inspect" reads by default.
+// Relative path keeps the demo self-contained — run it from any
+// workspace and the db lands there.
+const defaultDB = "./runs.db"
 
 type clockIn struct{}
 
@@ -51,10 +69,131 @@ func currentTimeTool() tool.Tool {
 }
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+	if err := dispatch(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "m1_hello:", err)
 		os.Exit(1)
 	}
+}
+
+// dispatch is the subcommand router. Default is "run" so older docs
+// that say `go run ./examples/m1_hello` still work.
+func dispatch(args []string) error {
+	if len(args) == 0 {
+		return runAgent([]string{})
+	}
+	switch args[0] {
+	case "run":
+		return runAgent(args[1:])
+	case "inspect":
+		return runInspect(args[1:])
+	case "-h", "--help", "help":
+		printUsage()
+		return nil
+	default:
+		printUsage()
+		return fmt.Errorf("unknown subcommand %q", args[0])
+	}
+}
+
+func printUsage() {
+	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  m1_hello run               # run the agent; events → "+defaultDB)
+	fmt.Fprintln(os.Stderr, "  m1_hello inspect [db]      # open the inspector with replay (default db: "+defaultDB+")")
+}
+
+// ----------------------------------------------------------------------
+// mode: run
+// ----------------------------------------------------------------------
+
+func runAgent(_ []string) error {
+	a, err := buildAgent(context.Background())
+	if err != nil {
+		return err
+	}
+	// Close the log on exit (only the run path owns the log; replay
+	// builds an in-memory sink of its own).
+	defer a.Log.(interface{ Close() error }).Close()
+
+	// Honour Ctrl-C so cancellation lands as RunCancelled in the log.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	res, runErr := a.Run(ctx, "What is the current UTC time? Use the current_time tool, then state the time in one short sentence.")
+
+	if res != nil {
+		printResult(res)
+		evs, _ := a.Log.Read(context.Background(), res.RunID)
+		printEvents(evs)
+		if verr := eventlog.Validate(evs); verr != nil {
+			fmt.Println("validate: FAIL:", verr)
+		} else {
+			fmt.Println("validate: ok")
+		}
+		fmt.Println("")
+		fmt.Println("next: go run ./examples/m1_hello inspect " + defaultDB)
+	}
+
+	if runErr != nil {
+		return fmt.Errorf("agent run: %w", runErr)
+	}
+	return nil
+}
+
+// ----------------------------------------------------------------------
+// mode: inspect (dual-mode hook — the point of this example)
+// ----------------------------------------------------------------------
+
+// runInspect delegates to starling.InspectCommand with a replay factory
+// that builds the SAME Agent the run path built. The inspector opens
+// the db read-only; the factory only fires when the user clicks Replay.
+func runInspect(args []string) error {
+	factory := replay.Factory(func(ctx context.Context) (replay.Agent, error) {
+		// Build a fresh Agent per replay session. No shared state: each
+		// replay uses its own sink and its own provider handle.
+		a, err := buildAgent(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// The runtime-produced Agent already implements replay.Agent
+		// (via RunReplay) and replay.StreamingAgent (via RunReplayInto)
+		// — no adapter needed.
+		return a, nil
+	})
+	cmd := starling.InspectCommand(factory)
+	cmd.Name = "m1_hello inspect"
+	return cmd.Run(args)
+}
+
+// ----------------------------------------------------------------------
+// shared construction
+// ----------------------------------------------------------------------
+
+// buildAgent is the single source of truth for the Agent's
+// configuration — same Provider, Tools, Config in run and replay. This
+// is the whole thesis of the event-sourced-with-replay design: the
+// only way replay stays faithful is if the factory is literally the
+// same function that built the original run.
+func buildAgent(_ context.Context) (*starling.Agent, error) {
+	prov, model, err := buildProvider()
+	if err != nil {
+		return nil, err
+	}
+
+	// Durable SQLite log so `run` leaves a file the inspector can read.
+	log, err := eventlog.NewSQLite(defaultDB)
+	if err != nil {
+		return nil, fmt.Errorf("open log: %w", err)
+	}
+
+	return &starling.Agent{
+		Provider: prov,
+		Tools:    []tool.Tool{currentTimeTool()},
+		Log:      log,
+		Config: starling.Config{
+			Model:    model,
+			MaxTurns: 4,
+		},
+	}, nil
 }
 
 // buildProvider picks between OpenAI (default) and Anthropic based on
@@ -96,50 +235,6 @@ func buildProvider() (provider.Provider, string, error) {
 		}
 		return prov, model, nil
 	}
-}
-
-func run() error {
-	prov, model, err := buildProvider()
-	if err != nil {
-		return err
-	}
-
-	log := eventlog.NewInMemory()
-	defer log.Close()
-
-	a := &starling.Agent{
-		Provider: prov,
-		Tools:    []tool.Tool{currentTimeTool()},
-		Log:      log,
-		Config: starling.Config{
-			Model:    model,
-			MaxTurns: 4,
-		},
-	}
-
-	// Honour Ctrl-C so cancellation lands as RunCancelled in the log.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
-	res, runErr := a.Run(ctx, "What is the current UTC time? Use the current_time tool, then state the time in one short sentence.")
-
-	// Print RunResult + event dump regardless of outcome — diagnostics
-	// matter most when the run failed.
-	if res != nil {
-		printResult(res)
-		evs, _ := log.Read(context.Background(), res.RunID)
-		printEvents(evs)
-		if verr := eventlog.Validate(evs); verr != nil {
-			fmt.Println("validate: FAIL:", verr)
-		} else {
-			fmt.Println("validate: ok")
-		}
-	}
-
-	if runErr != nil {
-		return fmt.Errorf("agent run: %w", runErr)
-	}
-	return nil
 }
 
 func printResult(r *starling.RunResult) {
