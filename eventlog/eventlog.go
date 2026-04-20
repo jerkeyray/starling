@@ -1,6 +1,9 @@
-// Package eventlog defines the EventLog interface and ships the default
-// backends: in-memory and SQLite. A Postgres backend is on the roadmap
-// but not yet implemented.
+// Package eventlog defines the EventLog interface and ships three
+// default backends: in-memory (NewInMemory), SQLite (NewSQLite), and
+// Postgres (NewPostgres). All three satisfy the same Append/Read/
+// Stream/Close contract; the SQLite and Postgres backends additionally
+// implement RunLister and support a read-only mode for inspector-style
+// consumers that must not be able to mutate the audit log.
 package eventlog
 
 import (
@@ -87,3 +90,8 @@ var ErrInvalidAppend = errors.New("eventlog: invalid append")
 // Callers can test with errors.Is(err, ErrLogCorrupt). Re-exported from
 // the root starling package as starling.ErrLogCorrupt.
 var ErrLogCorrupt = errors.New("eventlog: log failed validation")
+
+// ErrReadOnly is returned by Append on a log opened in read-only mode
+// (WithReadOnly on SQLite, WithReadOnlyPG on Postgres). Lifted from
+// the sqlite backend so both durable backends share the sentinel.
+var ErrReadOnly = errors.New("eventlog: log is read-only")

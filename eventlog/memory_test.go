@@ -1,8 +1,12 @@
 package eventlog_test
 
+// In-memory-specific tests. Every test that isn't tied to memory's
+// implementation details (slow-consumer drop, the long-history fix,
+// the tight-loop concurrency stress) lives in contract_test.go and
+// runs against every backend.
+
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -14,234 +18,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// chainBuilder tracks per-run Seq/PrevHash state so tests don't reimplement
-// the chain arithmetic.
-type chainBuilder struct {
-	seq      uint64
-	prevHash []byte
-}
-
-// next returns a fresh Event with valid Seq and PrevHash. The payload is a
-// UserMessageAppended carrying the supplied content so events are distinct.
-func (cb *chainBuilder) next(t *testing.T, runID, content string) event.Event {
-	t.Helper()
-	payload, err := event.EncodePayload(event.UserMessageAppended{Content: content})
-	if err != nil {
-		t.Fatalf("EncodePayload: %v", err)
-	}
-	cb.seq++
-	ev := event.Event{
-		RunID:     runID,
-		Seq:       cb.seq,
-		PrevHash:  cb.prevHash,
-		Timestamp: int64(cb.seq) * 1_000_000,
-		Kind:      event.KindUserMessageAppended,
-		Payload:   payload,
-	}
-	encoded, err := event.Marshal(ev)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	cb.prevHash = event.Hash(encoded)
-	return ev
-}
-
-func TestAppend_FirstEventMustStartAtSeq1(t *testing.T) {
-	log := eventlog.NewInMemory()
-	defer log.Close()
-
-	payload, _ := event.EncodePayload(event.UserMessageAppended{Content: "x"})
-	ev := event.Event{RunID: "r1", Seq: 5, Kind: event.KindUserMessageAppended, Payload: payload}
-	err := log.Append(context.Background(), "r1", ev)
-	if !errors.Is(err, eventlog.ErrInvalidAppend) {
-		t.Fatalf("want ErrInvalidAppend, got %v", err)
-	}
-}
-
-func TestAppend_FirstEventMustHaveEmptyPrevHash(t *testing.T) {
-	log := eventlog.NewInMemory()
-	defer log.Close()
-
-	payload, _ := event.EncodePayload(event.UserMessageAppended{Content: "x"})
-	ev := event.Event{
-		RunID: "r1", Seq: 1, PrevHash: []byte{0x01},
-		Kind: event.KindUserMessageAppended, Payload: payload,
-	}
-	err := log.Append(context.Background(), "r1", ev)
-	if !errors.Is(err, eventlog.ErrInvalidAppend) {
-		t.Fatalf("want ErrInvalidAppend, got %v", err)
-	}
-}
-
-func TestAppend_SeqMustBeMonotonic(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("skip", func(t *testing.T) {
-		log := eventlog.NewInMemory()
-		defer log.Close()
-		var cb chainBuilder
-		if err := log.Append(ctx, "r1", cb.next(t, "r1", "a")); err != nil {
-			t.Fatalf("first append: %v", err)
-		}
-		// Build a legitimate second event, then bump its Seq to skip.
-		bad := cb.next(t, "r1", "b")
-		bad.Seq = 3
-		if err := log.Append(ctx, "r1", bad); !errors.Is(err, eventlog.ErrInvalidAppend) {
-			t.Fatalf("want ErrInvalidAppend, got %v", err)
-		}
-	})
-
-	t.Run("replay", func(t *testing.T) {
-		log := eventlog.NewInMemory()
-		defer log.Close()
-		var cb chainBuilder
-		first := cb.next(t, "r1", "a")
-		if err := log.Append(ctx, "r1", first); err != nil {
-			t.Fatalf("first append: %v", err)
-		}
-		if err := log.Append(ctx, "r1", first); !errors.Is(err, eventlog.ErrInvalidAppend) {
-			t.Fatalf("want ErrInvalidAppend, got %v", err)
-		}
-	})
-}
-
-func TestAppend_PrevHashMustMatchPrevEvent(t *testing.T) {
-	log := eventlog.NewInMemory()
-	defer log.Close()
-	ctx := context.Background()
-
-	var cb chainBuilder
-	if err := log.Append(ctx, "r1", cb.next(t, "r1", "a")); err != nil {
-		t.Fatalf("first append: %v", err)
-	}
-	bad := cb.next(t, "r1", "b")
-	bad.PrevHash = make([]byte, event.HashSize) // all zeroes, wrong
-	if err := log.Append(ctx, "r1", bad); !errors.Is(err, eventlog.ErrInvalidAppend) {
-		t.Fatalf("want ErrInvalidAppend, got %v", err)
-	}
-}
-
-func TestAppend_HappyPath(t *testing.T) {
-	log := eventlog.NewInMemory()
-	defer log.Close()
-	ctx := context.Background()
-
-	var cb chainBuilder
-	want := make([]event.Event, 5)
-	for i := 0; i < 5; i++ {
-		ev := cb.next(t, "r1", fmt.Sprintf("msg-%d", i))
-		want[i] = ev
-		if err := log.Append(ctx, "r1", ev); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-
-	got, err := log.Read(ctx, "r1")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("round-trip mismatch:\nwant=%+v\ngot =%+v", want, got)
-	}
-}
-
-func TestRead_UnknownRunID_EmptySlice(t *testing.T) {
-	log := eventlog.NewInMemory()
-	defer log.Close()
-
-	got, err := log.Read(context.Background(), "never-seen")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if got != nil {
-		t.Fatalf("want nil slice, got %v", got)
-	}
-}
-
-func TestRead_ReturnsDefensiveCopy(t *testing.T) {
-	log := eventlog.NewInMemory()
-	defer log.Close()
-	ctx := context.Background()
-
-	var cb chainBuilder
-	for i := 0; i < 3; i++ {
-		if err := log.Append(ctx, "r1", cb.next(t, "r1", "x")); err != nil {
-			t.Fatalf("append: %v", err)
-		}
-	}
-
-	snap, err := log.Read(ctx, "r1")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	// Mutate the returned slice.
-	snap[0].RunID = "TAMPERED"
-
-	again, err := log.Read(ctx, "r1")
-	if err != nil {
-		t.Fatalf("Read again: %v", err)
-	}
-	if again[0].RunID != "r1" {
-		t.Fatalf("internal state mutated via returned slice: got RunID=%q", again[0].RunID)
-	}
-}
-
-func TestStream_ReplayThenLive(t *testing.T) {
-	log := eventlog.NewInMemory()
-	defer log.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	var cb chainBuilder
-	historical := make([]event.Event, 3)
-	for i := 0; i < 3; i++ {
-		historical[i] = cb.next(t, "r1", fmt.Sprintf("hist-%d", i))
-		if err := log.Append(ctx, "r1", historical[i]); err != nil {
-			t.Fatalf("append hist %d: %v", i, err)
-		}
-	}
-
-	ch, err := log.Stream(ctx, "r1")
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-
-	// Drain historical.
-	for i := 0; i < 3; i++ {
-		select {
-		case got := <-ch:
-			if got.Seq != historical[i].Seq {
-				t.Fatalf("hist[%d]: want Seq=%d, got %d", i, historical[i].Seq, got.Seq)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("timeout draining historical[%d]", i)
-		}
-	}
-
-	// Append live.
-	live := make([]event.Event, 2)
-	for i := 0; i < 2; i++ {
-		live[i] = cb.next(t, "r1", fmt.Sprintf("live-%d", i))
-		if err := log.Append(ctx, "r1", live[i]); err != nil {
-			t.Fatalf("append live %d: %v", i, err)
-		}
-	}
-	for i := 0; i < 2; i++ {
-		select {
-		case got := <-ch:
-			if got.Seq != live[i].Seq {
-				t.Fatalf("live[%d]: want Seq=%d, got %d", i, live[i].Seq, got.Seq)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("timeout draining live[%d]", i)
-		}
-	}
-}
-
 // TestStream_LongHistoryNotTruncated guards against a regression where
 // runs longer than streamBufferSize were silently truncated to the
 // first N events and the channel closed. The replay/inspector use
 // case is exactly long-run streaming, so this must deliver every event.
+//
+// Memory-specific because it targets the in-memory backend's goroutine-
+// pump path for histories larger than the channel buffer. SQLite's
+// Stream is a fresh poll every tick and can't hit this bug.
 func TestStream_LongHistoryNotTruncated(t *testing.T) {
 	log := eventlog.NewInMemory()
 	defer log.Close()
@@ -282,27 +66,11 @@ func TestStream_LongHistoryNotTruncated(t *testing.T) {
 	}
 }
 
-func TestStream_ContextCancelClosesChannel(t *testing.T) {
-	log := eventlog.NewInMemory()
-	defer log.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-
-	ch, err := log.Stream(ctx, "r1")
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-	cancel()
-
-	select {
-	case _, ok := <-ch:
-		if ok {
-			t.Fatalf("channel should be closed after cancel")
-		}
-	case <-time.After(time.Second):
-		t.Fatalf("channel not closed within timeout")
-	}
-}
-
+// TestStream_SlowConsumerGetsClosed pins memory's drop-slow-consumer
+// policy: a subscriber that falls more than streamBufferSize events
+// behind has its channel closed. Durable backends do not share this
+// semantic (SQLite polls; a slow consumer just blocks on the channel
+// until ctx is cancelled), so the test stays memory-specific.
 func TestStream_SlowConsumerGetsClosed(t *testing.T) {
 	log := eventlog.NewInMemory()
 	defer log.Close()
@@ -321,13 +89,12 @@ func TestStream_SlowConsumerGetsClosed(t *testing.T) {
 		}
 	}
 
-	// Drain what's buffered; eventually channel closes.
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
 		case _, ok := <-ch:
 			if !ok {
-				return // closed as expected
+				return
 			}
 		case <-deadline:
 			t.Fatalf("channel not closed after overflow")
@@ -335,28 +102,12 @@ func TestStream_SlowConsumerGetsClosed(t *testing.T) {
 	}
 }
 
-func TestClose_BlocksFurtherAppend(t *testing.T) {
-	log := eventlog.NewInMemory()
-	if err := log.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	var cb chainBuilder
-	err := log.Append(context.Background(), "r1", cb.next(t, "r1", "x"))
-	if !errors.Is(err, eventlog.ErrLogClosed) {
-		t.Fatalf("want ErrLogClosed, got %v", err)
-	}
-}
-
-func TestClose_Idempotent(t *testing.T) {
-	log := eventlog.NewInMemory()
-	if err := log.Close(); err != nil {
-		t.Fatalf("first Close: %v", err)
-	}
-	if err := log.Close(); err != nil {
-		t.Fatalf("second Close: %v", err)
-	}
-}
-
+// TestConcurrent_100AppendsAcross10Runs hammers the log with
+// concurrent Appends on disjoint runs. Memory-specific in commit 1:
+// SQLite's single-writer BeginTx model has not been tested under this
+// kind of load, and Postgres gets its own dedicated concurrency test
+// (exercising the per-run advisory lock) alongside the Postgres
+// backend.
 func TestConcurrent_100AppendsAcross10Runs(t *testing.T) {
 	log := eventlog.NewInMemory()
 	defer log.Close()
@@ -366,8 +117,6 @@ func TestConcurrent_100AppendsAcross10Runs(t *testing.T) {
 	const perRun = 10
 
 	g, gctx := errgroup.WithContext(ctx)
-	// Guard against NewInMemory returning a shared map: each run has its
-	// own chainBuilder, but we're hammering the same log from N goroutines.
 	var wg sync.WaitGroup
 	for r := 0; r < runs; r++ {
 		r := r
@@ -388,7 +137,6 @@ func TestConcurrent_100AppendsAcross10Runs(t *testing.T) {
 		t.Fatalf("concurrent appends: %v", err)
 	}
 
-	// Verify every run's chain is intact.
 	for r := 0; r < runs; r++ {
 		runID := fmt.Sprintf("run-%d", r)
 		events, err := log.Read(ctx, runID)

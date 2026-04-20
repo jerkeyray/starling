@@ -38,9 +38,6 @@ func WithReadOnly() SQLiteOption {
 	return func(c *sqliteConfig) { c.readOnly = true }
 }
 
-// ErrReadOnly is returned by Append on a log opened with WithReadOnly.
-var ErrReadOnly = errors.New("eventlog: log is read-only")
-
 // NewSQLite opens (or creates) a SQLite database at path and returns
 // an EventLog backed by it. WAL mode and synchronous=NORMAL are
 // enabled for concurrent read + single-writer throughput. The schema
