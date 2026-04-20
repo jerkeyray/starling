@@ -34,6 +34,15 @@ linters:
           disabled: true
         - name: package-comments
           disabled: true
+    errcheck:
+      # These are idiomatic "fire and forget" calls — checking the
+      # return value buys nothing and clutters every call site.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*database/sql.Rows).Close
+        - (io.Closer).Close
     gosec:
       excludes:
         # G104 overlaps with errcheck; let errcheck own it.

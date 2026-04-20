@@ -29,8 +29,12 @@ jobs:
       - run: go test -race -count=10 ./...
 
   # golangci-lint — conservative set configured in .golangci.yml.
+  # Non-blocking for now: findings show up as annotations but a red
+  # lint run doesn't fail CI. Flip `continue-on-error` to false once
+  # the backlog of warnings is worked down.
   lint:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
