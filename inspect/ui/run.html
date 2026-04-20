@@ -1,8 +1,14 @@
 {{define "content"}}
-<header class="run-head">
+<header class="run-head"
+        data-run-id="{{runPath .RunID}}"
+        data-run-terminal="{{.TerminalKind}}"
+        data-last-seq="{{.LastSeq}}">
   <div>
     <h1>Run <span class="runid-mono">{{.RunID}}</span></h1>
-    <p class="run-meta">{{len .Rows}} events</p>
+    <p class="run-meta">
+      <span id="event-count">{{len .Rows}}</span> events
+      <span id="live-status" class="live-pill" hidden>● live</span>
+    </p>
   </div>
   <div class="run-head-right">
     {{if .ReplayEnabled}}
@@ -19,27 +25,12 @@
 
 <section class="run-pane">
   <ol class="timeline" id="timeline">
-    {{$initSeq := .Initial.Seq}}
-    {{range .Rows}}
-    <li class="ev ev-{{.Family}}{{if eq .Seq $initSeq}} active{{end}}"
-        data-seq="{{.Seq}}"
-        {{if .CallID}}data-callid="{{.CallID}}"{{end}}>
-      <a href="#"
-         hx-get="{{.DetailURL}}"
-         hx-target="#detail"
-         hx-swap="innerHTML"
-         hx-on:click="document.querySelectorAll('#timeline .ev').forEach(n=>n.classList.remove('active'));this.parentElement.classList.add('active')">
-        <span class="ev-seq">{{.SeqLabel}}</span>
-        <span class="ev-time">{{.Time}}</span>
-        <span class="ev-kind">{{.Kind}}</span>
-        <span class="ev-summary">{{.Summary}}</span>
-      </a>
-    </li>
-    {{end}}
+    {{range .Rows}}{{template "event_row.html" .}}{{end}}
   </ol>
 
   <aside id="detail" class="detail">
     {{template "event_detail.html" .Initial}}
   </aside>
 </section>
+<script src="/static/run.js"></script>
 {{end}}

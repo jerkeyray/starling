@@ -180,6 +180,22 @@ table.runs td.num, table.runs th.num {
 .run-head h1 { margin: 0; font-size: 1.2rem; font-weight: 500; }
 .runid-mono { font-family: var(--mono); color: var(--accent); }
 .run-meta { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.9rem; }
+.live-pill {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  line-height: 1.4rem;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+.live-pill[data-state="disconnected"] {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
 .validation { text-align: right; }
 .validation-reason {
   margin: 0.35rem 0 0;

@@ -66,7 +66,23 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request, runID string)
 	}
 
 	rows := rowsFromEvents(runID, events)
+	if len(rows) > 0 {
+		// The initial render highlights the first event — the one whose
+		// detail is pre-painted in the right pane. Live-appended rows
+		// never get this flag.
+		rows[0].Active = true
+	}
 	validation := validationFromError(eventlog.Validate(events))
+
+	// Live-tail view-model fields. If the run is already terminal at
+	// render time, JS skips opening the SSE; otherwise it subscribes
+	// with ?since=<lastSeq> so the browser doesn't re-render the rows
+	// that came back in this HTML response.
+	terminalKind := ""
+	if last := events[len(events)-1]; last.Kind.IsTerminal() {
+		terminalKind = last.Kind.String()
+	}
+	lastSeq := events[len(events)-1].Seq
 
 	// Pre-render the first event's detail so the right pane is not
 	// empty on first paint. HTMX swaps it on subsequent clicks.
@@ -79,6 +95,8 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request, runID string)
 		"Validation":    validation,
 		"Initial":       initial,
 		"ReplayEnabled": s.ReplayEnabled(),
+		"TerminalKind":  terminalKind,
+		"LastSeq":       lastSeq,
 	})
 }
 

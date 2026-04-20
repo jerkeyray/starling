@@ -109,6 +109,7 @@ func (s *Server) routes() {
 //
 //	GET  /run/{id}                                  → handleRun (view)
 //	GET  /run/{id}/event/{seq}                      → handleEventDetail (HTMX)
+//	GET  /run/{id}/events/stream                    → handleEventStream (SSE live-tail)
 //	GET  /run/{id}/replay                           → handleReplayPage   (T44)
 //	POST /run/{id}/replay                           → handleReplayStart  (T43)
 //	GET  /run/{id}/replay/{session}/stream          → handleReplayStream (SSE, T43)
@@ -121,6 +122,24 @@ func (s *Server) dispatchRun(w http.ResponseWriter, r *http.Request) {
 	rest, err := url.PathUnescape(r.URL.Path[len("/run/"):])
 	if err != nil || rest == "" {
 		http.NotFound(w, r)
+		return
+	}
+
+	// /run/{id}/events/stream — live-tail SSE. Checked before /event/
+	// because "/events/stream" contains no "/event/" substring (note
+	// the "s") so ordering is nominal, but keeping the explicit path
+	// up top avoids future confusion.
+	if strings.HasSuffix(rest, "/events/stream") {
+		runID := strings.TrimSuffix(rest, "/events/stream")
+		if runID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleEventStream(w, r, runID)
 		return
 	}
 

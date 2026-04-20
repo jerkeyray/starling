@@ -139,6 +139,37 @@ beyond `localhost`.
   writing to the same DB stays correct: the inspector sees new rows
   on the next read. Pinned by `TestSQLite_ReadOnly_SeesLiveWrites`.
 
+## Live tail
+
+The run-detail page auto-appends events for runs that are still in
+progress. When you open `/run/{id}` and the log's last event is not
+terminal, the page subscribes to Server-Sent Events at:
+
+```
+GET /run/{id}/events/stream?since=<lastSeq>
+```
+
+Each frame carries the server-rendered `<li>` row plus a small
+metadata envelope:
+
+```json
+{"seq": 12, "kind": "ToolCallCompleted", "terminal": false,
+ "row_html": "<li data-seq=\"12\" …>…</li>"}
+```
+
+The browser appends `row_html` to the timeline as frames arrive. On
+the terminal event the page reloads so the server re-runs
+`eventlog.Validate` and repaints the hash-chain badge.
+
+The handler does its own catch-up via `store.Read()` before switching
+to `store.Stream()` for the tail, so it's correct on every backend
+regardless of Stream's history-vs-live ordering guarantees. Runs that
+are already terminal at page load open no stream.
+
+Cross-process works out of the box on SQLite: one process appends,
+the inspector (opened with `WithReadOnly()`) polls at 50ms and picks
+up new rows. Open a run mid-flight, watch it land.
+
 ## Full mode: replay from your own binary
 
 The standalone `starling-inspect` binary cannot replay, because
@@ -181,7 +212,7 @@ go run ./examples/m1_hello inspect ./runs.db
 
 | | Why |
 |---|---|
-| Live tail of in-progress runs | The current page is a snapshot. Server-Sent Events on top of `eventlog.Stream` is straightforward; deferred until a real user asks. |
+| Postgres live tail | InMemory and SQLite are the documented-shipped backends. PG inherits the endpoint unchanged (it already implements `Stream`) once the backend is formally announced. |
 | Authentication / TLS | Localhost developer tool by design. Use a reverse proxy. |
 | Hash-chain visualization | The validation badge + one-line reason covers the operator workflow. Full visualization if demand surfaces. |
 | Static export (`starling-inspect export ./out/`) | Cool for postmortems, deferred. |
@@ -194,6 +225,7 @@ For anyone hacking on the inspector:
 - `inspect_command.go` (root package) — `InspectCommand` / `InspectCmd`: flag parsing, listener, browser-open, signal-driven shutdown. Also exposed as a library entrypoint for dual-mode binaries.
 - `inspect/server.go` — `//go:embed ui` + route table + suffix-aware dispatcher (runIDs may contain `/` from namespaces).
 - `inspect/handlers.go` — HTTP handlers for runs list, run detail, event detail.
+- `inspect/live.go` — SSE live-tail endpoint (`/run/{id}/events/stream`); `Read()`-snapshot catch-up + `Stream()` tail with seq filter.
 - `inspect/replay.go` — replay session lifecycle + SSE streaming.
 - `inspect/view.go` — pure-function view models. No HTTP, no IO. Most behavior lives here and is unit-tested.
 - `inspect/templates.go` — `html/template` parsing with a `runPath` FuncMap for per-segment URL escaping; pages share `ui/layout.html`, partials parse standalone.

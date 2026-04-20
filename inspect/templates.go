@@ -1,6 +1,7 @@
 package inspect
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"html/template"
@@ -52,6 +53,7 @@ func mustParseTemplates(fsys embed.FS) *templates {
 	}
 	partials := []string{
 		"ui/event_detail.html",
+		"ui/event_row.html",
 	}
 
 	pageTpls := make(map[string]*template.Template, len(pages))
@@ -107,6 +109,21 @@ func (t *templates) renderPartial(w http.ResponseWriter, name string, status int
 	if err := tpl.ExecuteTemplate(w, name, data); err != nil {
 		_, _ = io.WriteString(w, "\n<!-- partial template error: "+err.Error()+" -->\n")
 	}
+}
+
+// renderPartialString executes a partial template into a buffer and
+// returns the HTML string. Used by the live-tail SSE handler to embed
+// a pre-rendered row inside a JSON frame.
+func (t *templates) renderPartialString(name string, data any) (string, error) {
+	tpl, ok := t.partials[name]
+	if !ok {
+		return "", fmt.Errorf("partial not found: %s", name)
+	}
+	var buf bytes.Buffer
+	if err := tpl.ExecuteTemplate(&buf, name, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func basename(path string) string {

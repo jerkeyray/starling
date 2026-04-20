@@ -96,14 +96,15 @@ func filterByStatus(rows []runRow, want string) []runRow {
 // Pre-computed so the template stays declarative — no calls into the
 // event package, no conditional rendering off Kind integers.
 type eventRow struct {
-	Seq         uint64
-	SeqLabel    string // "#0001", padded for visual alignment
-	Time        string // local hh:mm:ss.SSS
-	Kind        string // event.Kind.String()
-	Family      string // CSS class: lifecycle / tool / message / budget / terminal
-	Summary     string // short payload-derived label, e.g. "tool=fetch call=c1"
-	CallID      string // non-empty for tool events; used for cross-link highlighting
-	DetailURL   string // "/run/{id}/event/{seq}" for hx-get
+	Seq       uint64
+	SeqLabel  string // "#0001", padded for visual alignment
+	Time      string // local hh:mm:ss.SSS
+	Kind      string // event.Kind.String()
+	Family    string // CSS class: lifecycle / tool / message / budget / terminal
+	Summary   string // short payload-derived label, e.g. "tool=fetch call=c1"
+	CallID    string // non-empty for tool events; used for cross-link highlighting
+	DetailURL string // "/run/{id}/event/{seq}" for hx-get
+	Active    bool   // initial-render highlight; always false for SSE-streamed rows
 }
 
 // validationView renders the badge at the top of the run detail page.
@@ -235,21 +236,28 @@ func truncOneLine(s string, n int) string {
 	return string(out[:n]) + "…"
 }
 
+// rowFromEvent builds one timeline row. Pure function; shared by the
+// bulk renderer (rowsFromEvents) and the live-tail SSE endpoint so
+// the server-side render pipeline is single-sourced.
+func rowFromEvent(runID string, ev event.Event) eventRow {
+	summary, callID := summarize(ev)
+	return eventRow{
+		Seq:       ev.Seq,
+		SeqLabel:  fmt.Sprintf("#%04d", ev.Seq),
+		Time:      time.Unix(0, ev.Timestamp).Local().Format("15:04:05.000"),
+		Kind:      ev.Kind.String(),
+		Family:    kindFamily(ev.Kind),
+		Summary:   summary,
+		CallID:    callID,
+		DetailURL: fmt.Sprintf("/run/%s/event/%d", runPathEscape(runID), ev.Seq),
+	}
+}
+
 // rowsFromEvents builds the timeline. Pure function.
 func rowsFromEvents(runID string, events []event.Event) []eventRow {
 	out := make([]eventRow, len(events))
 	for i, ev := range events {
-		summary, callID := summarize(ev)
-		out[i] = eventRow{
-			Seq:       ev.Seq,
-			SeqLabel:  fmt.Sprintf("#%04d", ev.Seq),
-			Time:      time.Unix(0, ev.Timestamp).Local().Format("15:04:05.000"),
-			Kind:      ev.Kind.String(),
-			Family:    kindFamily(ev.Kind),
-			Summary:   summary,
-			CallID:    callID,
-			DetailURL: fmt.Sprintf("/run/%s/event/%d", runPathEscape(runID), ev.Seq),
-		}
+		out[i] = rowFromEvent(runID, ev)
 	}
 	return out
 }
