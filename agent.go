@@ -499,8 +499,24 @@ func (a *Agent) buildResult(runID string, startWall time.Time, term event.Kind) 
 // an error that wraps step.ErrReplayMismatch — the replay package
 // wraps that further into ErrNonDeterminism.
 func (a *Agent) RunReplay(ctx context.Context, recorded []event.Event) error {
+	sink := eventlog.NewInMemory()
+	defer sink.Close()
+	return a.RunReplayInto(ctx, recorded, sink)
+}
+
+// RunReplayInto is RunReplay with a caller-supplied sink log instead
+// of an internal in-memory one. Intended for callers (notably
+// replay.Stream) that need to observe the byte-matching events as
+// they are appended — subscribe to sink.Stream(...) before calling.
+//
+// The sink's lifecycle is the caller's responsibility; this method
+// does NOT close it.
+func (a *Agent) RunReplayInto(ctx context.Context, recorded []event.Event, sink eventlog.EventLog) error {
 	if len(recorded) == 0 {
 		return fmt.Errorf("starling: RunReplay called with no recorded events")
+	}
+	if sink == nil {
+		return fmt.Errorf("starling: RunReplayInto called with nil sink")
 	}
 	rs, err := recorded[0].AsRunStarted()
 	if err != nil {
@@ -516,13 +532,12 @@ func (a *Agent) RunReplay(ctx context.Context, recorded []event.Event) error {
 	}
 
 	// Shallow clone so we don't mutate the caller's Agent. Override
-	// the transient fields: Provider (replay), Log (fresh in-memory),
-	// and set replayRecorded so Run() flips into replay mode.
+	// the transient fields: Provider (replay), Log (caller-supplied
+	// sink), and set replayRecorded so Run() flips into replay mode.
 	clone := *a
 	clone.Provider = replayProv
-	clone.Log = eventlog.NewInMemory()
+	clone.Log = sink
 	clone.replayRecorded = recorded
-	defer clone.Log.Close()
 
 	_, runErr := clone.Run(ctx, rs.Goal)
 	return runErr

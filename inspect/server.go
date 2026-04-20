@@ -17,8 +17,10 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/jerkeyray/starling/eventlog"
+	"github.com/jerkeyray/starling/replay"
 )
 
 // uiFS holds every file under ui/ — templates and static assets —
@@ -43,10 +45,14 @@ func staticFS() fs.FS {
 // pass it to http.Server.Handler directly or mount it under a
 // reverse proxy. Server is safe for concurrent use.
 type Server struct {
-	store  eventlog.EventLog
-	lister eventlog.RunLister
-	tpl    *templates
-	mux    *http.ServeMux
+	store    eventlog.EventLog
+	lister   eventlog.RunLister
+	tpl      *templates
+	mux      *http.ServeMux
+	replayer replay.Factory // nil → view-only; replay routes hidden / 404
+
+	sessMu   sync.Mutex
+	sessions map[string]*replaySession
 }
 
 // Option customises a Server at construction time. None are exported
@@ -67,38 +73,60 @@ func New(store eventlog.EventLog, opts ...Option) (*Server, error) {
 		return nil, errors.New("inspect: store does not implement eventlog.RunLister")
 	}
 	s := &Server{
-		store:  store,
-		lister: lister,
-		tpl:    mustParseTemplates(uiFS),
-		mux:    http.NewServeMux(),
+		store:    store,
+		lister:   lister,
+		tpl:      mustParseTemplates(uiFS),
+		mux:      http.NewServeMux(),
+		sessions: make(map[string]*replaySession),
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
 	s.routes()
+	if s.replayer != nil {
+		go s.gcReplaySessions()
+	}
 	return s, nil
 }
+
+// ReplayEnabled reports whether a Replayer was wired in via
+// WithReplayer. UI templates use this to hide the Replay button on
+// view-only deployments.
+func (s *Server) ReplayEnabled() bool { return s.replayer != nil }
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleRuns)
 	// Single prefix for everything under /run/. The dispatcher peels
-	// off the path and decides between the full-page detail view and
-	// the HTMX-swappable event-detail fragment.
+	// off the path and decides between the full-page detail view, the
+	// HTMX-swappable event-detail fragment, and (when a Replayer is
+	// wired) the replay-session endpoints.
 	s.mux.HandleFunc("/run/", s.dispatchRun)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
 }
 
-// dispatchRun routes /run/{id} → handleRun and
-// /run/{id}/event/{seq} → handleEventDetail. Kept as a single mux
-// entry so handleRun can still use strings.TrimPrefix on the full
-// path without competing patterns.
+// dispatchRun routes within the /run/ prefix:
+//
+//	GET  /run/{id}                                  → handleRun (view)
+//	GET  /run/{id}/event/{seq}                      → handleEventDetail (HTMX)
+//	POST /run/{id}/replay                           → handleReplayStart  (T43)
+//	GET  /run/{id}/replay/{session}/stream          → handleReplayStream (SSE, T43)
+//	POST /run/{id}/replay/{session}/control         → handleReplayControl (T43)
+//
+// Replay routes 404 when no Replayer is configured.
 func (s *Server) dispatchRun(w http.ResponseWriter, r *http.Request) {
 	rest := r.URL.Path[len("/run/"):]
-	if strings.Contains(rest, "/event/") {
+	switch {
+	case strings.Contains(rest, "/event/"):
 		s.handleEventDetail(w, r)
-		return
+	case strings.Contains(rest, "/replay"):
+		if s.replayer == nil {
+			http.NotFound(w, r)
+			return
+		}
+		s.dispatchReplay(w, r, rest)
+	default:
+		s.handleRun(w, r)
 	}
-	s.handleRun(w, r)
 }
 
 // ServeHTTP implements http.Handler.
