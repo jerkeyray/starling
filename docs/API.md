@@ -791,6 +791,42 @@ if len(os.Args) > 1 && os.Args[1] == "inspect" {
 See `examples/m1_hello` for a complete working binary and
 `docs/REPLAY_DEBUGGING.md` for the workflow.
 
+### 8b.2 Runtime CLI helpers (root package)
+
+The `cmd/starling` binary bundles four subcommands over any local
+SQLite event log. Each command is also exposed as a root-package
+helper so dual-mode binaries can host the same subcommands alongside
+a user-built `replay.Factory`.
+
+```go
+// ValidateCommand runs eventlog.Validate against one run (or every
+// run in the log) and prints per-run status. Read-only.
+func ValidateCommand() *ValidateCmd
+type ValidateCmd struct { Name string; Output io.Writer }
+func (c *ValidateCmd) Run(args []string) error // args: <db> [<runID>]
+
+// ExportCommand dumps one run as NDJSON (one line per event,
+// envelope + typed payload). Read-only.
+func ExportCommand() *ExportCmd
+type ExportCmd struct { Name string; Output io.Writer }
+func (c *ExportCmd) Run(args []string) error // args: <db> <runID>
+
+// ReplayCommand headlessly replays one run and prints OK or
+// DIVERGED. factory may be nil, in which case Run errors with a
+// dual-mode-guidance message — the stock `cmd/starling` binary
+// uses that path.
+func ReplayCommand(factory replay.Factory) *ReplayCmd
+type ReplayCmd struct { Factory replay.Factory; Name string; Output io.Writer }
+func (c *ReplayCmd) Run(args []string) error // args: <db> <runID>
+```
+
+Stock binary vs dual-mode: the shipped `cmd/starling` passes nil
+factories to `ReplayCommand` and `InspectCommand`, which is
+sufficient for `validate`, `export`, and view-only `inspect`.
+Users who need `replay` from the CLI (or `Replay` from the
+inspector UI) build a small main.go that dispatches to the same
+helpers with a real factory wired in.
+
 ---
 
 ## 9. Design constraints reflected in the API
