@@ -26,8 +26,9 @@ func TestKind_String(t *testing.T) {
 		{event.KindRunCompleted, "RunCompleted"},
 		{event.KindRunFailed, "RunFailed"},
 		{event.KindRunCancelled, "RunCancelled"},
+		{event.KindRunResumed, "RunResumed"},
 		{event.Kind(99), "Kind(99)"},
-		{event.Kind(15), "Kind(15)"}, // reserved slot, not yet named
+		{event.Kind(16), "Kind(16)"}, // reserved slot for TurnFailed, not yet named
 	}
 	for _, c := range cases {
 		if got := c.k.String(); got != c.want {
@@ -42,7 +43,7 @@ func TestKind_IsTerminal(t *testing.T) {
 		event.KindRunFailed:    true,
 		event.KindRunCancelled: true,
 	}
-	for k := event.Kind(1); k <= event.Kind(14); k++ {
+	for k := event.Kind(1); k <= event.Kind(15); k++ {
 		if got, want := k.IsTerminal(), terminal[k]; got != want {
 			t.Errorf("Kind(%s).IsTerminal() = %v, want %v", k, got, want)
 		}

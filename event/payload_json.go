@@ -67,6 +67,8 @@ func payloadValue(e Event) (any, error) {
 		return e.AsRunFailed()
 	case KindRunCancelled:
 		return e.AsRunCancelled()
+	case KindRunResumed:
+		return e.AsRunResumed()
 	}
 	return nil, fmt.Errorf("event: ToJSON: unknown kind %s", e.Kind)
 }

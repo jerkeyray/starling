@@ -66,6 +66,18 @@ type Config struct {
 	// The agent loop sets this from starling.Config.Logger with run_id
 	// already bound.
 	Logger *slog.Logger
+
+	// ResumeFromSeq and ResumeFromPrevHash seed the chain cursor for
+	// resumed runs. Both are zero/nil for a fresh run (the default: the
+	// first emitted event is seq=1 with empty PrevHash). Set by
+	// (*Agent).Resume to the last-recorded seq and its event-hash so
+	// the first event this Context emits extends the existing chain.
+	//
+	// ResumeFromSeq is the seq of the last event already in the log;
+	// the first emit uses seq = ResumeFromSeq + 1. ResumeFromPrevHash
+	// must equal event.Hash(event.Marshal(lastEvent)).
+	ResumeFromSeq      uint64
+	ResumeFromPrevHash []byte
 }
 
 // DefaultMaxParallelTools is the fan-out cap used by CallTools when

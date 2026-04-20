@@ -83,6 +83,12 @@ func NewContext(cfg Config) (*Context, error) {
 	if logger == nil {
 		logger = obs.Discard()
 	}
+	nextSeq := uint64(1)
+	var prevHash []byte
+	if cfg.ResumeFromSeq > 0 {
+		nextSeq = cfg.ResumeFromSeq + 1
+		prevHash = append(prevHash, cfg.ResumeFromPrevHash...)
+	}
 	return &Context{
 		log:              cfg.Log,
 		runID:            cfg.RunID,
@@ -94,7 +100,8 @@ func NewContext(cfg Config) (*Context, error) {
 		clockFn:          clockFn,
 		maxParallelTools: cfg.MaxParallelTools,
 		logger:           logger,
-		nextSeq:          1,
+		nextSeq:          nextSeq,
+		prevHash:         prevHash,
 	}, nil
 }
 

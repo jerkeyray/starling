@@ -90,7 +90,8 @@ func TestPostgres_Smoke(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %d events, want 3", len(got))
 	}
-	if err := eventlog.Validate(got); err != nil {
+	sealed := sealChain(t, ctx, log, "smoke", cb, got)
+	if err := eventlog.Validate(sealed); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 }
@@ -238,7 +239,8 @@ func TestPostgres_ConcurrentAppendsSameRun(t *testing.T) {
 			t.Fatalf("events[%d].Seq = %d, want %d", i, ev.Seq, i+1)
 		}
 	}
-	if err := eventlog.Validate(got); err != nil {
+	sealed := sealChain(t, ctx, log, "contended", cb, got)
+	if err := eventlog.Validate(sealed); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 	if atomic.LoadInt32(&failures) == 0 {
@@ -263,13 +265,15 @@ func TestPostgres_ConcurrentAppendsDifferentRunsParallel(t *testing.T) {
 	start := time.Now()
 	var wg sync.WaitGroup
 	errs := make(chan error, runs)
+	builders := make([]*chainBuilder, runs)
 	for r := 0; r < runs; r++ {
 		r := r
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			runID := fmt.Sprintf("run-%d", r)
-			var cb chainBuilder
+			cb := &chainBuilder{}
+			builders[r] = cb
 			for i := 0; i < perRun; i++ {
 				if err := log.Append(ctx, runID, cb.next(t, runID, fmt.Sprintf("%d-%d", r, i))); err != nil {
 					errs <- fmt.Errorf("run %s append %d: %w", runID, i, err)
@@ -294,7 +298,8 @@ func TestPostgres_ConcurrentAppendsDifferentRunsParallel(t *testing.T) {
 		if len(evs) != perRun {
 			t.Fatalf("run %s: got %d events, want %d", runID, perRun, len(evs))
 		}
-		if err := eventlog.Validate(evs); err != nil {
+		sealed := sealChain(t, ctx, log, runID, builders[r], evs)
+		if err := eventlog.Validate(sealed); err != nil {
 			t.Fatalf("Validate %s: %v", runID, err)
 		}
 		for i, ev := range evs {

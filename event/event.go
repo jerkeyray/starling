@@ -46,7 +46,8 @@ const (
 	KindRunCompleted              Kind = 12
 	KindRunFailed                 Kind = 13
 	KindRunCancelled              Kind = 14
-	// 15 reserved for KindTurnFailed.
+	KindRunResumed                Kind = 15
+	// 16 reserved for KindTurnFailed.
 )
 
 // String returns the canonical name of k. Unknown kinds render as
@@ -81,6 +82,8 @@ func (k Kind) String() string {
 		return "RunFailed"
 	case KindRunCancelled:
 		return "RunCancelled"
+	case KindRunResumed:
+		return "RunResumed"
 	}
 	return fmt.Sprintf("Kind(%d)", uint8(k))
 }

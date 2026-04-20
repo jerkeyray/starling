@@ -252,3 +252,26 @@ type RunCancelled struct {
 	MerkleRoot []byte `cbor:"merkle_root" json:"merkle_root"`
 	DurationMs int64  `cbor:"duration_ms" json:"duration_ms"`
 }
+
+// ---------------------------------------------------------------------------
+// 15. RunResumed (non-terminal seam marker)
+// ---------------------------------------------------------------------------
+
+// RunResumed marks the point where (*Agent).Resume re-entered a run that had
+// been started in a previous process. It is a non-terminal seam: events
+// before RunResumed were written by the original process; events after were
+// written by the resuming process.
+//
+// AtSeq is the sequence number of the last event recorded before the resume
+// (i.e. RunResumed.PrevHash was computed over the event at AtSeq).
+// ExtraMessage, if non-empty, mirrors the extraMessage argument passed to
+// Resume and will be followed immediately by a UserMessageAppended event.
+// ReissueTools records the WithReissueTools decision; PendingCalls is the
+// number of ToolCallScheduled events observed without a matching
+// Completed/Failed pair at the resume point.
+type RunResumed struct {
+	AtSeq        uint64 `cbor:"at_seq" json:"at_seq"`
+	ExtraMessage string `cbor:"extra_message,omitempty" json:"extra_message,omitempty"`
+	ReissueTools bool   `cbor:"reissue_tools" json:"reissue_tools"`
+	PendingCalls int    `cbor:"pending_calls" json:"pending_calls"`
+}

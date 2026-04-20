@@ -33,6 +33,7 @@ func TestToJSON_AllKinds(t *testing.T) {
 		{"RunCompleted", event.KindRunCompleted, event.RunCompleted{FinalText: "done", TurnCount: 2}, "final_text"},
 		{"RunFailed", event.KindRunFailed, event.RunFailed{Error: "boom", ErrorType: "provider"}, "error_type"},
 		{"RunCancelled", event.KindRunCancelled, event.RunCancelled{Reason: "context_canceled"}, "reason"},
+		{"RunResumed", event.KindRunResumed, event.RunResumed{AtSeq: 42, ReissueTools: true, PendingCalls: 2}, "at_seq"},
 	}
 
 	for _, tc := range cases {

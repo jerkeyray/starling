@@ -5,6 +5,7 @@ import (
 	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/zeebo/blake3"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Agent is the user-facing entry point. Construction is a plain
@@ -134,10 +136,33 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	}
 	logger.Info("run started", "model", a.Config.Model)
 
-	// 2. Run the ReAct loop, catching the terminal reason.
-	runErr := a.react(ctx, goal)
+	msgs := []provider.Message{{Role: provider.RoleUser, Content: goal}}
+	return a.runLoop(ctx, stepCtx, runSpan, logger, startWall, msgs, 0)
+}
 
-	// 3. Emit the terminal event.
+// runLoop is the "after RunStarted" body of Run, factored out so Resume
+// can re-enter with a pre-populated msgs slice and a non-zero starting
+// turn index. It runs the ReAct loop, emits the terminal event, and
+// materializes RunResult.
+//
+// startTurn is the turn counter the loop enters at; Resume passes the
+// number of TurnStarted events already in the log so Config.MaxTurns
+// continues to cap total turns across resumed runs.
+func (a *Agent) runLoop(
+	ctx context.Context,
+	stepCtx *step.Context,
+	runSpan trace.Span,
+	logger *slog.Logger,
+	startWall time.Time,
+	msgs []provider.Message,
+	startTurn int,
+) (*RunResult, error) {
+	runID := stepCtx.RunID()
+
+	// Run the ReAct loop, catching the terminal reason.
+	runErr := a.react(ctx, msgs, startTurn)
+
+	// Emit the terminal event.
 	term, terr := a.emitTerminal(ctx, stepCtx, runErr, startWall)
 	if terr != nil {
 		// Terminal emission failure is catastrophic — the run is now
@@ -164,10 +189,6 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	}
 
 	result, readErr := a.buildResult(runID, startWall, term)
-	// readErr is only populated if the log backend failed to re-read
-	// events after a successful terminal emit — rare, but indicates a
-	// log-backend problem the caller should know about. Combine it with
-	// runErr so neither is silently lost.
 	if readErr != nil {
 		if runErr != nil {
 			return result, errors.Join(runErr, readErr)
@@ -180,8 +201,13 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 // react is the ReAct loop: call LLM, if it planned tools dispatch them,
 // loop. Returns nil on clean completion (model produced text with no
 // tool uses), or an error to feed into emitTerminal.
-func (a *Agent) react(ctx context.Context, goal string) error {
-	msgs := []provider.Message{{Role: provider.RoleUser, Content: goal}}
+//
+// msgs is the starting conversation history (for Run, a single user
+// message built from goal; for Resume, the history reconstructed from
+// events). startTurn is the initial value of the turn counter so
+// Config.MaxTurns caps total turns across the whole run even when
+// Resume re-enters the loop.
+func (a *Agent) react(ctx context.Context, msgs []provider.Message, startTurn int) error {
 	// Config.MaxTurns is the documented contract: 0 (or negative) means
 	// unlimited; positive caps the loop. ctx cancellation and budget
 	// limits are the safety nets when the cap is off.
@@ -191,7 +217,7 @@ func (a *Agent) react(ctx context.Context, goal string) error {
 	sc, _ := step.From(ctx)
 	logger := sc.Logger()
 
-	for turn := 0; unlimited || turn < maxTurns; turn++ {
+	for turn := startTurn; unlimited || turn < maxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

@@ -21,7 +21,32 @@ import (
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
+	"github.com/jerkeyray/starling/internal/merkle"
 )
+
+// sealChain appends a RunCompleted terminal with a correct MerkleRoot
+// over the existing events so eventlog.Validate passes. Returns the
+// full sealed slice. Used by tests that build a raw chain with
+// chainBuilder.next and want to exercise Validate on the result.
+func sealChain(t *testing.T, ctx context.Context, log eventlog.EventLog, runID string, cb *chainBuilder, existing []event.Event) []event.Event {
+	t.Helper()
+	leaves, err := merkle.EventHashes(existing)
+	if err != nil {
+		t.Fatalf("EventHashes: %v", err)
+	}
+	root := merkle.Root(leaves)
+	payload, err := event.EncodePayload(event.RunCompleted{
+		FinalText: "ok", TurnCount: 0, MerkleRoot: root,
+	})
+	if err != nil {
+		t.Fatalf("EncodePayload RunCompleted: %v", err)
+	}
+	term := cb.nextKind(t, runID, int64(cb.seq+1)*1_000_000, event.KindRunCompleted, payload)
+	if err := log.Append(ctx, runID, term); err != nil {
+		t.Fatalf("append terminal: %v", err)
+	}
+	return append(existing, term)
+}
 
 // backend is one row of the contract matrix: a name (for t.Run
 // subtests) and an open function that returns a fresh EventLog.

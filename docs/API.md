@@ -57,7 +57,23 @@ There is also a package-level helper:
 func Replay(ctx context.Context, log eventlog.EventLog, runID string, a *Agent) error
 ```
 
-Resume and Stream are not yet shipped — see §10.
+Resume continues a previously-started run from its last recorded event:
+
+```go
+// Resume continues an interrupted run. Reconstructs conversation state
+// from the log and re-enters the agent loop so the run can finish in
+// a new process. extraMessage, if non-empty, is appended as a user
+// turn before the loop resumes. See docs/RESUME.md.
+func (a *Agent) Resume(ctx context.Context, runID, extraMessage string) (*RunResult, error)
+
+// ResumeWith is Resume with options. Options:
+//   WithReissueTools(bool) — default true; when false, returns
+//     ErrPartialToolCall if the run has unpaired ToolCallScheduled
+//     events.
+func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts ...ResumeOption) (*RunResult, error)
+```
+
+Stream is not yet shipped — see §10.
 
 ### 1.2 RunResult
 

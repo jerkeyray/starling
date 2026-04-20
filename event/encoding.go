@@ -135,3 +135,9 @@ func (e Event) AsRunFailed() (RunFailed, error) {
 func (e Event) AsRunCancelled() (RunCancelled, error) {
 	return asPayload[RunCancelled](e, KindRunCancelled)
 }
+
+// AsRunResumed decodes e into a RunResumed payload. Returns an error if
+// e.Kind is not KindRunResumed.
+func (e Event) AsRunResumed() (RunResumed, error) {
+	return asPayload[RunResumed](e, KindRunResumed)
+}

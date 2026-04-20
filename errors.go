@@ -24,8 +24,35 @@ var (
 	// ErrNonDeterminism is reserved for M2's replay verifier.
 	ErrNonDeterminism = errors.New("starling: non-determinism detected during replay")
 
-	// ErrRunNotFound is reserved for Resume/Replay.
+	// ErrRunNotFound is returned by Resume when the requested runID has
+	// no events in the log.
 	ErrRunNotFound = errors.New("starling: run not found in log")
+
+	// ErrRunAlreadyTerminal is returned by Resume when the run's last
+	// event is a terminal kind (RunCompleted/RunFailed/RunCancelled).
+	// Resuming a terminated run is not supported — the terminal event
+	// commits a Merkle root over every event before it, and appending
+	// past that point would invalidate the commitment.
+	ErrRunAlreadyTerminal = errors.New("starling: run already terminal")
+
+	// ErrSchemaVersionMismatch is returned by Resume when the run's
+	// RunStarted event records a schema version this binary does not
+	// understand.
+	ErrSchemaVersionMismatch = errors.New("starling: event schema version mismatch")
+
+	// ErrPartialToolCall is returned by Resume when the run's tail
+	// contains a ToolCallScheduled event without a matching
+	// ToolCallCompleted/ToolCallFailed, and WithReissueTools(false) was
+	// passed. It signals that the resuming process would otherwise have
+	// to re-issue a tool call of unknown idempotency.
+	ErrPartialToolCall = errors.New("starling: run has a partial tool call; pass WithReissueTools(true) to reissue")
+
+	// ErrRunInUse is returned by Resume when its first Append onto the
+	// existing chain is rejected because another writer has advanced
+	// the tail under us. Indicates two processes are racing to resume
+	// the same run — the loser bails cleanly rather than risk chain
+	// corruption.
+	ErrRunInUse = errors.New("starling: run is being appended by another writer")
 
 	// ErrLogCorrupt wraps every eventlog.Validate failure. Aliased
 	// from the eventlog package so callers that never import eventlog

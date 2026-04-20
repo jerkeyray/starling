@@ -111,6 +111,15 @@ See [`docs/REPLAY.md`](./docs/REPLAY.md) for the full cookbook:
 determinism rules, common causes of `ErrNonDeterminism`, and an
 end-to-end crash-then-replay example.
 
+## Resume a crashed run
+
+`(*Agent).Resume(ctx, runID, extraMessage)` reconstructs conversation
+state from the log and re-enters the agent loop so a run that died
+mid-flight can finish in a new process. Partial tool calls are
+re-issued with fresh CallIDs by default; pass
+`starling.WithReissueTools(false)` via `ResumeWith` for tools with
+mutation side effects. See [`docs/RESUME.md`](./docs/RESUME.md).
+
 ## Providers
 
 ### OpenAI-compatible
