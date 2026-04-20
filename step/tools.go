@@ -303,6 +303,9 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 		if reg == nil {
 			obs.SetSpanError(attemptSpan, ErrToolNotFound)
 			attemptSpan.End()
+			if c.metrics != nil {
+				c.metrics.ObserveToolCall(call.Name, "error", "tool", 0)
+			}
 			return nil, emitToolFailed(ctx, c, call.CallID, ErrToolNotFound, "tool", 0, uint32(attempt))
 		}
 		tl, ok := reg.Get(call.Name)
@@ -310,12 +313,25 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			wrapped := fmt.Errorf("%w: %s", ErrToolNotFound, call.Name)
 			obs.SetSpanError(attemptSpan, wrapped)
 			attemptSpan.End()
+			if c.metrics != nil {
+				c.metrics.ObserveToolCall(call.Name, "error", "tool", 0)
+			}
 			return nil, emitToolFailed(ctx, c, call.CallID, wrapped, "tool", 0, uint32(attempt))
 		}
 
 		start := time.Now()
 		result, execErr := runToolSafely(attemptCtx, tl, call.Args)
-		durMs := ReplayDurationMs(ctx, time.Since(start).Milliseconds())
+		wall := time.Since(start)
+		durMs := ReplayDurationMs(ctx, wall.Milliseconds())
+		if c.metrics != nil {
+			status := "ok"
+			errType := "none"
+			if execErr != nil {
+				status = "error"
+				errType = classifyToolError(ctx, execErr)
+			}
+			c.metrics.ObserveToolCall(call.Name, status, errType, wall)
+		}
 
 		if execErr == nil {
 			resultRaw := result

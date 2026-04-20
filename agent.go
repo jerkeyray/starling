@@ -61,6 +61,14 @@ type Agent struct {
 	// this at Run time.
 	Namespace string
 
+	// Metrics is an optional Prometheus metrics sink. When non-nil,
+	// every run emits counters/histograms covering lifecycle, provider
+	// calls, tool calls, eventlog appends, and budget trips. See
+	// NewMetrics / MetricsHandler. Nil (the default) disables the
+	// entire metrics pipeline — record calls become no-ops at the
+	// lowest level and there is no runtime cost.
+	Metrics *Metrics
+
 	// replayRecorded, when non-nil, switches Run into replay mode:
 	// step.Context operates under ModeReplay, the RunID is pulled from
 	// the first recorded event rather than freshly minted, and every
@@ -94,6 +102,13 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	}
 	startWall := time.Now()
 
+	// Metrics: bump the started/in-flight counters as early as possible
+	// and decrement in-flight on every exit. Terminal-status and
+	// duration histograms are observed inside runLoop once we know
+	// how the run ended.
+	a.Metrics.onRunStarted()
+	defer a.Metrics.onRunFinished()
+
 	// Wall-clock budget: wrap the run's ctx with a deadline so blocking
 	// provider/tool calls unblock on expiry. DeadlineExceeded surfaces
 	// through LLMCall / CallTool unchanged; emitTerminal inspects
@@ -119,6 +134,7 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 		Tools:    step.NewRegistry(a.Tools...),
 		Budget:   budgetStepConfig(a.Budget),
 		Logger:   logger,
+		Metrics:  a.Metrics.stepSink(),
 	}
 	if len(a.replayRecorded) > 0 {
 		stepCfg.Mode = step.ModeReplay
@@ -176,7 +192,9 @@ func (a *Agent) runLoop(
 
 	// Log the terminal outcome. RunFailed escalates to Error; normal
 	// completion and cancellation are informational.
-	termAttrs := []any{obs.AttrKind, term.String(), obs.AttrDurMs, time.Since(startWall).Milliseconds()}
+	elapsed := time.Since(startWall)
+	termAttrs := []any{obs.AttrKind, term.String(), obs.AttrDurMs, elapsed.Milliseconds()}
+	a.Metrics.onRunTerminal(terminalMetricStatus(term, runErr), terminalMetricErrorType(term, runErr), elapsed)
 	switch term {
 	case event.KindRunFailed:
 		logger.Error("run failed", append(termAttrs, "err", errString(runErr))...)
@@ -434,6 +452,9 @@ func (a *Agent) emitTerminal(ctx context.Context, sc *step.Context, runErr error
 			Where:  "mid_stream",
 		}); err != nil {
 			return 0, fmt.Errorf("emit BudgetExceeded(wall_clock): %w", err)
+		}
+		if a.Metrics != nil {
+			a.Metrics.onBudgetExceeded("wall_clock")
 		}
 		// Re-read events so the Merkle root covers the BudgetExceeded
 		// we just emitted.
@@ -711,6 +732,37 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// terminalMetricStatus maps a terminal event kind to the metrics
+// status enum: ok | error | cancelled | budget. Budget trips are
+// surfaced separately from generic errors so "how often do we run
+// out of budget vs. crash" is one PromQL query, not two.
+func terminalMetricStatus(term event.Kind, runErr error) string {
+	switch term {
+	case event.KindRunCompleted:
+		return "ok"
+	case event.KindRunCancelled:
+		return "cancelled"
+	case event.KindRunFailed:
+		if errors.Is(runErr, ErrBudgetExceeded) || errors.Is(runErr, step.ErrBudgetExceeded) {
+			return "budget"
+		}
+		return "error"
+	}
+	return "error"
+}
+
+// terminalMetricErrorType is the cardinality-bounded error_type
+// label companion to terminalMetricStatus. Returns "none" for ok
+// and cancelled terminals; otherwise reuses classifyRunError so
+// the metric label and the RunFailed.ErrorType payload stay in
+// sync.
+func terminalMetricErrorType(term event.Kind, runErr error) string {
+	if term == event.KindRunCompleted || term == event.KindRunCancelled {
+		return "none"
+	}
+	return classifyRunError(runErr)
 }
 
 func classifyRunError(err error) string {

@@ -48,6 +48,11 @@ type Context struct {
 	// logger when cfg.Logger is nil so call sites can assume a logger.
 	logger *slog.Logger
 
+	// metrics records observability samples for provider / tool /
+	// eventlog calls. May be nil; every emit site must tolerate a
+	// nil sink by short-circuiting.
+	metrics MetricsSink
+
 	mu       sync.Mutex
 	nextSeq  uint64
 	prevHash []byte
@@ -100,6 +105,7 @@ func NewContext(cfg Config) (*Context, error) {
 		clockFn:          clockFn,
 		maxParallelTools: cfg.MaxParallelTools,
 		logger:           logger,
+		metrics:          cfg.Metrics,
 		nextSeq:          nextSeq,
 		prevHash:         prevHash,
 	}, nil
@@ -127,6 +133,11 @@ func (c *Context) RunID() string { return c.runID }
 // the agent loop and downstream tool implementations that want to
 // participate in the run's structured trace.
 func (c *Context) Logger() *slog.Logger { return c.logger }
+
+// Metrics returns the MetricsSink this Context records to, or nil
+// when metrics are disabled. Call sites should treat nil as a
+// no-op rather than guarding every method call.
+func (c *Context) Metrics() MetricsSink { return c.metrics }
 
 // prov returns the provider configured on this Context, or nil if none.
 func (c *Context) prov() provider.Provider { return c.provider }
@@ -193,8 +204,17 @@ func emit[T any](ctx context.Context, c *Context, kind event.Kind, payload T) er
 	// In particular, tool-failure events for cancelled tools would
 	// otherwise be silently dropped, leaving the chain terminated at
 	// the Scheduled event with no matching outcome.
-	if err := c.log.Append(context.WithoutCancel(ctx), c.runID, ev); err != nil {
-		return err
+	start := time.Now()
+	appendErr := c.log.Append(context.WithoutCancel(ctx), c.runID, ev)
+	if c.metrics != nil {
+		status := "ok"
+		if appendErr != nil {
+			status = "error"
+		}
+		c.metrics.ObserveEventlogAppend(kind.String(), status, time.Since(start))
+	}
+	if appendErr != nil {
+		return appendErr
 	}
 	c.nextSeq++
 	c.prevHash = event.Hash(marshaled)

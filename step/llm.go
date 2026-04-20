@@ -66,6 +66,9 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 		}); err != nil {
 			return nil, fmt.Errorf("step.LLMCall: emit BudgetExceeded: %w", err)
 		}
+		if c.metrics != nil {
+			c.metrics.ObserveBudgetExceeded("input_tokens")
+		}
 		c.logger.Warn("budget exceeded",
 			obs.AttrLimit, "input_tokens",
 			obs.AttrCap, cap,
@@ -96,8 +99,30 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 		return nil, fmt.Errorf("step.LLMCall: emit TurnStarted: %w", err)
 	}
 
+	// Usage declared early so the deferred metrics observation below
+	// can see whatever the drain loop last wrote. Zero values are
+	// the correct "no usage reported" default.
+	var usage provider.UsageUpdate
+
 	// 5. Open stream.
+	providerStart := time.Now()
 	stream, err := p.Stream(ctx, req)
+	// Observe once per LLMCall on whichever path exits. The deferred
+	// closure reads the final `err` and `usage` values, so open
+	// failures (stream == nil, usage zero), drain failures, and
+	// successful completions all land in the same histogram.
+	defer func() {
+		if c.metrics == nil {
+			return
+		}
+		c.metrics.ObserveProviderCall(
+			req.Model,
+			providerCallStatus(ctx, err),
+			time.Since(providerStart),
+			usage.InputTokens,
+			usage.OutputTokens,
+		)
+	}()
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +131,6 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 	// 6. Drain.
 	var (
 		textBuf       bytes.Buffer
-		usage         provider.UsageUpdate
 		stopReason    string
 		rawRespHash   []byte
 		providerReqID string
@@ -219,6 +243,9 @@ drain:
 						PartialTokens: usage.OutputTokens,
 					}); err != nil {
 						return nil, fmt.Errorf("step.LLMCall: emit BudgetExceeded: %w", err)
+					}
+					if c.metrics != nil {
+						c.metrics.ObserveBudgetExceeded(limit)
 					}
 					c.logger.Warn("budget exceeded",
 						obs.AttrLimit, limit,
@@ -358,6 +385,25 @@ func normalizeJSONNumbers(v any) any {
 	default:
 		return v
 	}
+}
+
+// providerCallStatus maps the result of an LLMCall into the
+// metrics status enum: "ok" on success, "cancelled" if ctx was
+// cancelled or the error unwraps to a cancellation, otherwise
+// "error". Budget trips count as "error" because the provider
+// call itself completed normally — budget metrics are recorded
+// separately via ObserveBudgetExceeded.
+func providerCallStatus(ctx context.Context, err error) string {
+	if err == nil {
+		return "ok"
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "cancelled"
+	}
+	if ctx.Err() != nil {
+		return "cancelled"
+	}
+	return "error"
 }
 
 // ulidMu guards access to ulid.MustNew with a crypto/rand entropy

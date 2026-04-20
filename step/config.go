@@ -78,6 +78,27 @@ type Config struct {
 	// must equal event.Hash(event.Marshal(lastEvent)).
 	ResumeFromSeq      uint64
 	ResumeFromPrevHash []byte
+
+	// Metrics is an optional observability sink. Nil disables all
+	// metric recording inside this step.Context. The root starling
+	// package wires a Prometheus-backed implementation; step exposes
+	// only the interface so it doesn't pull the client_golang
+	// dependency into the core loop.
+	Metrics MetricsSink
+}
+
+// MetricsSink is the narrow interface step.Context uses to record
+// observability samples. Implementations must be concurrency-safe
+// and must tolerate being called in a tight loop — the eventlog
+// observer runs on every emit.
+//
+// Implementations may no-op any method; the interface exists only
+// so step doesn't depend on a concrete metrics library.
+type MetricsSink interface {
+	ObserveProviderCall(model, status string, d time.Duration, promptTokens, completionTokens int64)
+	ObserveToolCall(toolName, status, errorType string, d time.Duration)
+	ObserveEventlogAppend(kind, status string, d time.Duration)
+	ObserveBudgetExceeded(axis string)
 }
 
 // DefaultMaxParallelTools is the fan-out cap used by CallTools when
