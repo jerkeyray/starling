@@ -26,10 +26,23 @@ import (
 
 // sealChain appends a RunCompleted terminal with a correct MerkleRoot
 // over the existing events so eventlog.Validate passes. Returns the
-// full sealed slice. Used by tests that build a raw chain with
-// chainBuilder.next and want to exercise Validate on the result.
-func sealChain(t *testing.T, ctx context.Context, log eventlog.EventLog, runID string, cb *chainBuilder, existing []event.Event) []event.Event {
+// full sealed slice. Used by tests that build a raw chain and want
+// to exercise Validate on the result.
+//
+// The terminal's Seq and PrevHash are derived from the last element
+// of existing, not from a chainBuilder — under contended-append
+// workloads the shared chainBuilder can drift below the DB's real
+// tail, and the just-read slice is the only authoritative view.
+func sealChain(t *testing.T, ctx context.Context, log eventlog.EventLog, runID string, existing []event.Event) []event.Event {
 	t.Helper()
+	if len(existing) == 0 {
+		t.Fatalf("sealChain: existing is empty")
+	}
+	last := existing[len(existing)-1]
+	lastEnc, err := event.Marshal(last)
+	if err != nil {
+		t.Fatalf("Marshal tail: %v", err)
+	}
 	leaves, err := merkle.EventHashes(existing)
 	if err != nil {
 		t.Fatalf("EventHashes: %v", err)
@@ -41,7 +54,14 @@ func sealChain(t *testing.T, ctx context.Context, log eventlog.EventLog, runID s
 	if err != nil {
 		t.Fatalf("EncodePayload RunCompleted: %v", err)
 	}
-	term := cb.nextKind(t, runID, int64(cb.seq+1)*1_000_000, event.KindRunCompleted, payload)
+	term := event.Event{
+		RunID:     runID,
+		Seq:       last.Seq + 1,
+		PrevHash:  event.Hash(lastEnc),
+		Timestamp: int64(last.Seq+1) * 1_000_000,
+		Kind:      event.KindRunCompleted,
+		Payload:   payload,
+	}
 	if err := log.Append(ctx, runID, term); err != nil {
 		t.Fatalf("append terminal: %v", err)
 	}

@@ -90,7 +90,7 @@ func TestPostgres_Smoke(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %d events, want 3", len(got))
 	}
-	sealed := sealChain(t, ctx, log, "smoke", cb, got)
+	sealed := sealChain(t, ctx, log, "smoke", got)
 	if err := eventlog.Validate(sealed); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestPostgres_ConcurrentAppendsSameRun(t *testing.T) {
 			t.Fatalf("events[%d].Seq = %d, want %d", i, ev.Seq, i+1)
 		}
 	}
-	sealed := sealChain(t, ctx, log, "contended", cb, got)
+	sealed := sealChain(t, ctx, log, "contended", got)
 	if err := eventlog.Validate(sealed); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -271,15 +271,13 @@ func TestPostgres_ConcurrentAppendsDifferentRunsParallel(t *testing.T) {
 	start := time.Now()
 	var wg sync.WaitGroup
 	errs := make(chan error, runs)
-	builders := make([]*chainBuilder, runs)
 	for r := 0; r < runs; r++ {
 		r := r
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			runID := fmt.Sprintf("run-%d", r)
-			cb := &chainBuilder{}
-			builders[r] = cb
+			var cb chainBuilder
 			for i := 0; i < perRun; i++ {
 				if err := log.Append(ctx, runID, cb.next(t, runID, fmt.Sprintf("%d-%d", r, i))); err != nil {
 					errs <- fmt.Errorf("run %s append %d: %w", runID, i, err)
@@ -304,7 +302,7 @@ func TestPostgres_ConcurrentAppendsDifferentRunsParallel(t *testing.T) {
 		if len(evs) != perRun {
 			t.Fatalf("run %s: got %d events, want %d", runID, perRun, len(evs))
 		}
-		sealed := sealChain(t, ctx, log, runID, builders[r], evs)
+		sealed := sealChain(t, ctx, log, runID, evs)
 		if err := eventlog.Validate(sealed); err != nil {
 			t.Fatalf("Validate %s: %v", runID, err)
 		}
