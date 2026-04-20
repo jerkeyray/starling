@@ -1,228 +1,161 @@
-# Starling — Public API (v0 draft)
+# Starling — Public API
 
-> Concrete signatures for every exported type. Working "hello agent" examples.
-> Last updated: apr 2026
+<!-- Prose contracts + navigational overview. The authoritative
+signature reference is godoc: https://pkg.go.dev/github.com/jerkeyray/starling -->
 
----
 
-## 1. Root package — `github.com/jerkeyray/starling`
+Starling is a Go event-sourced LLM agent runtime. Every run is a
+hash-chained event log, and every run is byte-for-byte replayable.
 
-### 1.1 Agent
-
-```go
-type Agent struct {
-    Provider  provider.Provider
-    Tools     []tool.Tool
-    Log       eventlog.EventLog
-    Budget    *Budget   // optional; zero on any axis disables that axis
-    Config    Config
-    Namespace string    // optional RunID prefix; must not contain "/"
-}
-
-type Config struct {
-    Model        string
-    SystemPrompt string
-    Params       cborenc.RawMessage  // provider-specific params (temperature, top_p, max_tokens, ...)
-    MaxTurns     int                 // 0 = unlimited (the run is still bounded by ctx and Budget)
-    Logger       *slog.Logger        // optional; defaults to slog.Default()
-}
-```
-
-Methods:
-
-```go
-// Run starts a new agent run. Returns the final result plus the run ID
-// (which is Namespace + "/" + ULID when Namespace is set).
-func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error)
-
-// RunReplay re-executes a previously-recorded sequence of events
-// against a's current Provider/Tools, using the recording as the
-// LLM/side-effect oracle, and returns nil iff every produced event
-// matched the recording. Useful for ad-hoc verification; for a
-// streaming UI-driven replay see the replay package and inspect.WithReplayer.
-func (a *Agent) RunReplay(ctx context.Context, recorded []event.Event) error
-
-// RunReplayInto is the streaming variant of RunReplay: it writes every
-// produced event into sink as it goes, so callers can subscribe via
-// sink.Stream and observe the replay live.
-func (a *Agent) RunReplayInto(ctx context.Context, recorded []event.Event, sink eventlog.EventLog) error
-```
-
-There is also a package-level helper:
-
-```go
-// Replay re-runs the recording stored in log under runID against a, and
-// returns ErrNonDeterminism (or another error) on mismatch. Thin wrapper
-// over (*Agent).RunReplay.
-func Replay(ctx context.Context, log eventlog.EventLog, runID string, a *Agent) error
-```
-
-Resume continues a previously-started run from its last recorded event:
-
-```go
-// Resume continues an interrupted run. Reconstructs conversation state
-// from the log and re-enters the agent loop so the run can finish in
-// a new process. extraMessage, if non-empty, is appended as a user
-// turn before the loop resumes. See docs/RESUME.md.
-func (a *Agent) Resume(ctx context.Context, runID, extraMessage string) (*RunResult, error)
-
-// ResumeWith is Resume with options. Options:
-//   WithReissueTools(bool) — default true; when false, returns
-//     ErrPartialToolCall if the run has unpaired ToolCallScheduled
-//     events.
-func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts ...ResumeOption) (*RunResult, error)
-```
-
-Stream returns a channel delivering one `StepEvent` per emitted event
-for a live run. Terminal events are always the last item on the
-channel before it closes.
-
-```go
-// Stream starts a new agent run and returns a channel of StepEvents.
-// Setup errors (validation, log subscribe) return synchronously; the
-// channel is nil on that path. Run-time errors surface as a terminal
-// StepEvent (Kind=RunFailed/RunCancelled, Err populated) and then the
-// channel closes — Stream itself does not return a second error.
-//
-// The channel has a small buffer (64); consumers should drain
-// promptly or risk losing events via the eventlog's slow-subscriber
-// drop policy. The channel still closes cleanly in that case.
-//
-// On ctx cancel the agent run is cancelled (standard ctx plumbing)
-// and the channel closes after draining any in-flight events.
-func (a *Agent) Stream(ctx context.Context, goal string) (runID string, events <-chan StepEvent, err error)
-```
-
-### 1.2 RunResult
-
-```go
-type RunResult struct {
-    RunID          string
-    FinalText      string
-    TurnCount      int
-    ToolCallCount  int
-    TotalCostUSD   float64
-    InputTokens    int64
-    OutputTokens   int64
-    Duration       time.Duration
-    TerminalKind   event.Kind   // RunCompleted | RunFailed | RunCancelled
-    MerkleRoot     []byte
-}
-```
-
-### 1.3 StepEvent
-
-User-facing view of an event, produced by `(*Agent).Stream`. Narrower
-than the raw `event.Event`.
-
-```go
-type StepEvent struct {
-    Kind   event.Kind
-    TurnID string
-    CallID string
-    Text   string        // for AssistantMessageCompleted or token-stream chunks
-    Tool   string        // for tool call events
-    Err    error         // non-nil on Failed kinds
-    Raw    event.Event   // full event for consumers who want it
-}
-```
-
-### 1.4 Budget
-
-Re-exported from `budget` for convenience.
-
-```go
-type Budget = budget.Budget
-
-// Budget enforcement limits. Zero = no limit on that axis.
-type Budget struct {
-    MaxInputTokens  int64
-    MaxOutputTokens int64
-    MaxUSD          float64
-    MaxWallClock    time.Duration
-}
-```
-
-### 1.5 Errors
-
-```go
-var (
-    ErrBudgetExceeded    = errors.New("starling: budget exceeded")
-    ErrNonDeterminism    = errors.New("starling: non-determinism detected during replay")
-    ErrRunNotFound       = errors.New("starling: run not found in log")
-    ErrLogCorrupt        = errors.New("starling: log failed validation")
-    ErrMaxTurnsExceeded  = errors.New("starling: max turns exceeded")
-)
-
-type ToolError struct {
-    Name string
-    Err  error
-}
-
-func (e *ToolError) Error() string { ... }
-func (e *ToolError) Unwrap() error { return e.Err }
-
-type ProviderError struct {
-    Provider string
-    Code     int
-    Err      error
-}
-
-func (e *ProviderError) Error() string { ... }
-func (e *ProviderError) Unwrap() error { return e.Err }
-```
-
-### 1.6 Replay options
-
-The current replay path is strict and side-effect-free by construction:
-the recording is the oracle, and any mismatch returns an error wrapping
-`ErrNonDeterminism`. There are no public option toggles. A re-execute /
-cache-miss-falls-back-to-live mode is on the roadmap but not shipped.
+This document covers behavioral contracts, extension-point rules, and
+stability promises. **Full signatures and field-level docs live on
+[pkg.go.dev](https://pkg.go.dev/github.com/jerkeyray/starling)**; this
+page does not re-list every field.
 
 ---
 
-## 2. `starling/event`
+## 1. Package layout
 
-```go
-type Event struct {
-    RunID     string
-    Seq       uint64
-    PrevHash  []byte
-    Timestamp int64
-    Kind      Kind
-    Payload   cbor.RawMessage
-}
-
-type Kind uint8
-
-const (
-    KindRunStarted Kind = 1
-    // ... (see EVENTS.md)
-)
-
-// Typed helpers for each kind:
-func (e Event) AsRunStarted() (RunStarted, error)
-func (e Event) AsTurnStarted() (TurnStarted, error)
-func (e Event) AsAssistantMessageCompleted() (AssistantMessageCompleted, error)
-func (e Event) AsToolCallScheduled() (ToolCallScheduled, error)
-// ... one per kind
-
-// ToJSON projects an event's payload to JSON. The shape mirrors the
-// canonical CBOR exactly — every payload struct's `cbor:"..."` tags
-// are mirrored as `json:"..."`. Intended for inspectors, log dumps,
-// and tooling that wants a human-readable view; the canonical wire
-// format remains CBOR. Byte-slice fields (PrevHash, raw response
-// hashes, CBOR-encoded tool args) appear as base64 — that's how
-// `encoding/json` handles `[]byte`.
-//
-// Function, not a method: the JSON projection is an external concern
-// and a free function keeps `Event` itself decoder-shaped.
-func ToJSON(ev Event) ([]byte, error)
-```
+| Package                            | Role                                                             |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| `starling`                         | `Agent`, `Config`, `Budget`, `RunResult`, `StepEvent`, CLI verbs |
+| `starling/event`                   | Event envelope, `Kind` constants, typed payload helpers          |
+| `starling/eventlog`                | `EventLog` interface, in-memory / SQLite / Postgres backends     |
+| `starling/provider`                | `Provider` interface, streaming types, aggregated `Response`     |
+| `starling/provider/openai`         | OpenAI Chat Completions + every OpenAI-compatible endpoint       |
+| `starling/provider/anthropic`      | Anthropic Messages adapter                                       |
+| `starling/tool`                    | `Tool` interface, `Typed[In,Out]` reflective helper              |
+| `starling/tool/builtin`            | Small demo tool set (`Fetch`, `ReadFile`)                        |
+| `starling/step`                    | Determinism-enforcing primitives: `LLMCall`, `CallTool`, etc.    |
+| `starling/replay`                  | Replay-factory plumbing and side-by-side stream                  |
+| `starling/inspect`                 | Read-only HTTP inspector (`http.Handler`)                        |
 
 ---
 
-## 3. `starling/eventlog`
+## 2. `starling` — root package
+
+### 2.1 `Agent`
+
+`Agent` is a plain struct literal; construction does no work. Fields
+are validated on `Run`, not at build time. See godoc for the full field
+set.
+
+**Required fields:** `Provider`, `Log`, `Config.Model`.
+
+**Optional:** `Tools`, `Budget` (zero axes are disabled), `Namespace`
+(RunID prefix; must not contain `/`), `Metrics`, `Config.Logger`,
+`Config.SystemPrompt`, `Config.MaxTurns` (0 = unlimited),
+`Config.Params` (`[]byte`, provider-specific params — typically
+canonical CBOR).
+
+**Lifecycle methods** (all return terminal events in the log
+regardless of how they exit):
+
+- `Run(ctx, goal) (*RunResult, error)` — start a new run.
+- `Stream(ctx, goal) (runID, <-chan StepEvent, error)` — start a run
+  and observe live events. Setup errors return synchronously; run-time
+  errors surface as a terminal `StepEvent` (`Kind` in
+  `RunFailed`/`RunCancelled`, `Err` populated) before the channel
+  closes. Channel buffer is 64; slow consumers may drop events via the
+  underlying eventlog's drop policy, but the channel still closes
+  cleanly.
+- `Resume(ctx, runID, extraMessage) (*RunResult, error)` — reconstruct
+  state from the log and continue a previously-interrupted run.
+  `ResumeWith(...ResumeOption)` accepts options:
+  - `WithReissueTools(bool)` (default `true`): if `false`, returns
+    `ErrPartialToolCall` when the run has an unpaired
+    `ToolCallScheduled`.
+- `RunReplay(ctx, recorded) error` — re-execute a recorded event
+  sequence as an oracle; any divergence wraps `ErrNonDeterminism`.
+- `RunReplayInto(ctx, recorded, sink)` — streaming variant; emits into
+  `sink` so callers can subscribe via `sink.Stream`.
+
+There is a package-level `Replay(ctx, log, runID, agent)` convenience
+wrapper.
+
+### 2.2 Results, events, budget
+
+- `RunResult` — summary: `RunID`, `FinalText`, counts, token/cost
+  totals, `Duration`, `TerminalKind`, `MerkleRoot`. Full detail always
+  lives in `Log`.
+- `StepEvent` — user-facing projection of an `event.Event` for
+  `Stream` consumers: `Kind`, `TurnID`, `CallID`, `Text`, `Tool`, `Err`,
+  plus `Raw event.Event` for callers that want everything.
+- `Budget` — alias of `budget.Budget`. Four axes:
+  `MaxInputTokens`, `MaxOutputTokens`, `MaxUSD`, `MaxWallClock`. Zero
+  disables an axis. Input is enforced pre-call; output and USD
+  mid-stream on every usage chunk; wall-clock via `context.WithDeadline`.
+
+### 2.3 Errors
+
+Sentinel errors (all wrap via `%w` and are discriminated with
+`errors.Is`):
+
+- `ErrBudgetExceeded`, `ErrMaxTurnsExceeded`
+- `ErrNonDeterminism`, `ErrLogCorrupt` (aliased from `eventlog`)
+- `ErrRunNotFound`, `ErrRunAlreadyTerminal`, `ErrRunInUse`,
+  `ErrSchemaVersionMismatch`, `ErrPartialToolCall`
+
+Typed errors:
+
+- `ToolError{Name, CallID, Err}` — unrecoverable tool failure.
+- `ProviderError{Provider, Code, Err}` — provider-layer failure;
+  `Code` is HTTP status when available.
+
+### 2.4 Metrics
+
+`Metrics` is an opt-in Prometheus sink attached via `Agent.Metrics`.
+`nil` (the default) is a zero-cost no-op.
+
+- `NewMetrics(reg prometheus.Registerer) *Metrics` — registers every
+  collector. Panics on duplicate registration or `nil` registerer.
+- `MetricsHandler(g prometheus.Gatherer) http.Handler` — convenience
+  over `promhttp.HandlerFor`.
+
+Label cardinality is bounded by the caller's static config (model,
+tool name, closed-enum statuses); nothing user-controlled per request
+can inflate series count.
+
+### 2.5 CLI helper commands
+
+Every subcommand of the stock `cmd/starling` binary is also exposed as
+a root-package helper so dual-mode user binaries can host the same
+verbs alongside a real `replay.Factory`. Each constructor returns a
+`*<Name>Cmd` whose `Run(args []string) error` parses its own flags.
+
+| Constructor                                   | What it does                                                                              |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `ValidateCommand() *ValidateCmd`              | Runs `eventlog.Validate` on one run or every run. Read-only.                              |
+| `ExportCommand() *ExportCmd`                  | Dumps one run as NDJSON (envelope + typed payload). Read-only.                            |
+| `ReplayCommand(factory) *ReplayCmd`           | Headlessly replays one run; prints `OK`/`DIVERGED`. `nil` factory errors with a hint.     |
+| `InspectCommand(factory) *InspectCmd`         | Opens the log read-only and serves the inspector over HTTP. `nil` factory = view-only.    |
+
+The stock binary passes `nil` for both factory arguments; users who
+want `replay` from the CLI or a live Replay button in the inspector
+build a thin `main.go` that dispatches to these helpers with a real
+factory wired in. See `examples/m1_hello`.
+
+---
+
+## 3. `starling/event`
+
+`Event` is a tag+payload envelope (`RunID`, `Seq`, `PrevHash`,
+`Timestamp`, `Kind`, `Payload`). `Payload` is canonical CBOR on the
+wire; typed accessors (`AsRunStarted`, `AsAssistantMessageCompleted`,
+one per kind) decode it.
+
+`ToJSON(ev) ([]byte, error)` projects an event to JSON for inspectors
+and log dumps — it's a free function, not a method, because the JSON
+projection is an external concern. Byte-slice fields are base64 (stdlib
+`encoding/json` behavior).
+
+For the full `Kind` list and payload schemas, see `EVENTS.md`.
+
+---
+
+## 4. `starling/eventlog`
+
+### 4.1 Interface
 
 ```go
 type EventLog interface {
@@ -231,210 +164,110 @@ type EventLog interface {
     Stream(ctx context.Context, runID string) (<-chan event.Event, error)
     Close() error
 }
+```
 
-// In-memory implementation (M1).
-func NewInMemory() EventLog
+**Implementer contract:**
 
-// SQLite-backed implementation (M2). Default durable backend. Pure Go via modernc.org/sqlite.
-func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error)
+- `Append` MUST reject any event whose `Seq`/`PrevHash` does not
+  extend the existing chain for `runID`. This is what makes
+  `ErrRunInUse` and `ErrLogCorrupt` meaningful.
+- `Stream` MUST deliver events in chain order and MUST close the
+  channel when the run reaches a terminal kind or `ctx` is cancelled.
+  Slow-subscriber drops are permitted, but the close must be clean.
+- `Read` returns the full chain as of the call; it is NOT required to
+  include events appended after the read starts.
 
-// A Postgres backend is on the roadmap (NewPostgres) but not yet
-// implemented. SQLite is the only durable backend shipped today.
+### 4.2 Shipped backends
 
-// SQLiteOption tunes SQLite open behavior.
-type SQLiteOption func(*sqliteConfig)
+- `NewInMemory() EventLog` — process-local, test-grade.
+- `NewSQLite(path, opts...) (EventLog, error)` — default durable
+  backend; pure Go via `modernc.org/sqlite`. Options include
+  `WithReadOnly()` (Append returns `ErrReadOnly`; WAL + change-counter
+  checks stay in force so it's safe against a concurrently-writing
+  sibling).
+- `NewPostgres(db *sql.DB, opts...) (EventLog, error)` — multi-host
+  concurrent-writer backend. Caller brings the `*sql.DB` (pgx stdlib or
+  `lib/pq`); Starling never imports a driver. Options:
+  `WithReadOnlyPG()`, `WithAutoMigratePG()`. `InstallSchema(ctx, db)`
+  applies the schema out-of-band. Per-`run_id` serialization is
+  enforced with `pg_advisory_xact_lock`.
 
-// WithReadOnly opens the database with `?mode=ro`. Append always
-// returns ErrReadOnly. Intended for inspector-style tools that must
-// not mutate the audit log they are inspecting. Crucially does NOT
-// pass `immutable=1`: a read-only handle remains correct against a
-// database that another Starling process is actively writing to,
-// because WAL + change-counter checks stay in effect.
-func WithReadOnly() SQLiteOption
+### 4.3 Optional `RunLister`
 
-// ErrReadOnly is returned by Append on a handle opened WithReadOnly.
-var ErrReadOnly = errors.New("eventlog: log is read-only")
-
-// RunLister is an OPTIONAL interface for backends that can enumerate
-// the runs they hold. It is intentionally NOT part of EventLog so
-// write-only / forwarding backends are not forced to support it.
-// Both built-in backends (NewInMemory, NewSQLite) satisfy it; type-
-// assert when you need to enumerate:
-//
-//     lister, ok := log.(eventlog.RunLister)
-//     if !ok { ... }
-//     summaries, err := lister.ListRuns(ctx)
+```go
 type RunLister interface {
     ListRuns(ctx context.Context) ([]RunSummary, error)
 }
-
-// RunSummary is the minimum needed to render a runs-list view —
-// inspectors, dashboards, scripts that triage failed runs. Sorted
-// newest-first by StartedAt.
-type RunSummary struct {
-    RunID        string
-    StartedAt    time.Time  // wall-clock time of the first event
-    LastSeq      uint64     // doubles as event count: events are 1-indexed
-    TerminalKind event.Kind // 0 if the run never terminated (still in progress)
-}
 ```
+
+Deliberately **not** part of `EventLog` — write-only/forwarding
+backends shouldn't be forced to enumerate. Both shipped backends
+satisfy it; callers type-assert when they need it. `RunSummary`
+carries `RunID`, `StartedAt`, `LastSeq`, `TerminalKind` (zero when the
+run is still in progress), sorted newest-first.
+
+`ErrReadOnly` is the sentinel returned by any read-only handle on
+`Append`.
 
 ---
 
-## 4. `starling/provider`
+## 5. `starling/provider`
+
+### 5.1 Interface
 
 ```go
 type Provider interface {
     Info() Info
     Stream(ctx context.Context, req *Request) (EventStream, error)
 }
-
-// Info is consumed by the agent loop to populate RunStarted.ProviderID and
-// RunStarted.APIVersion. Adapters return a stable identifier (e.g. "openai",
-// "groq") and an API-version string (e.g. "v1", "2023-06-01").
-type Info struct {
-    ID         string
-    APIVersion string
-}
-
-type Request struct {
-    Model        string
-    SystemPrompt string
-    Messages     []Message
-    Tools        []ToolDefinition
-    Params       cbor.RawMessage   // caller-controlled provider-native params
-}
-
-type Role string
-
-const (
-    RoleSystem    Role = "system"
-    RoleUser      Role = "user"
-    RoleAssistant Role = "assistant"
-    RoleTool      Role = "tool"
-)
-
-type Message struct {
-    Role       Role
-    Content    string
-    ToolUses   []ToolUse    // when Role=assistant and the model planned tool calls
-    ToolResult *ToolResult  // when Role=tool
-}
-
-type ToolDefinition struct {
-    Name        string
-    Description string
-    Schema      json.RawMessage
-}
-
-type ToolUse struct {
-    CallID string
-    Name   string
-    Args   json.RawMessage
-}
-
-type ToolResult struct {
-    CallID  string
-    Content string
-    IsError bool
-}
-
-type EventStream interface {
-    Next(ctx context.Context) (StreamChunk, error)  // returns io.EOF at end
-    Close() error
-}
-
-type StreamChunk struct {
-    Kind            ChunkKind
-    Text            string
-    ToolUse         *ToolUseChunk
-    Usage           *UsageUpdate
-    StopReason      string        // set on End chunks
-    RawResponseHash []byte        // set on End chunks (BLAKE3 of canonical provider bytes)
-    ProviderReqID   string
-}
-
-type ToolUseChunk struct {
-    CallID    string
-    Name      string  // set on ChunkToolUseStart only
-    ArgsDelta string  // set on ChunkToolUseDelta; concatenate across chunks for full JSON
-}
-
-// Note: ChunkReasoning is part of the surface for future adapters (Anthropic
-// extended thinking, o-series reasoning traces). The M1 OpenAI Chat Completions
-// adapter does not emit it — OpenAI's public streaming API surfaces no
-// reasoning deltas.
-
-type ChunkKind uint8
-
-const (
-    ChunkText ChunkKind = iota + 1
-    ChunkReasoning
-    ChunkToolUseStart
-    ChunkToolUseDelta
-    ChunkToolUseEnd
-    ChunkUsage
-    ChunkEnd
-)
-
-type UsageUpdate struct {
-    InputTokens       int64   // final value (OpenAI: last chunk; Anthropic: message_start)
-    OutputTokens      int64   // final-only for OpenAI-family (include_usage: true); cumulative for Anthropic
-    CacheReadTokens   int64
-    CacheCreateTokens int64
-}
-
-// Response is the aggregated outcome of a streaming completion,
-// returned by step.LLMCall. ToolUses carries Args as provider-reported
-// JSON bytes — step.CallTool accepts those verbatim via ToolCall.Args.
-type Response struct {
-    Text            string
-    ToolUses        []ToolUse
-    StopReason      string
-    Usage           UsageUpdate
-    CostUSD         float64
-    RawResponseHash []byte
-    ProviderReqID   string
-}
 ```
 
-### 4.1 `starling/provider/openai` (M1)
+`Info.ID` and `Info.APIVersion` are recorded into `RunStarted` so
+replay can verify the adapter hasn't silently swapped out.
 
-Adapter for the OpenAI Chat Completions API and every OpenAI-compatible endpoint (Azure OpenAI, Groq, Together, OpenRouter, Ollama, vLLM, LM Studio, llama.cpp server, DeepSeek, Fireworks, Anyscale, Mistral compat mode, …). Compatibility providers are unlocked by `WithBaseURL` — no separate adapter per vendor.
+`Request` carries `Model`, `SystemPrompt`, `Messages`, `Tools`, and
+caller-controlled `Params` (canonical CBOR bytes). `EventStream.Next`
+returns `io.EOF` at end; chunks follow the kinds
+`ChunkText`, `ChunkReasoning`, `ChunkToolUseStart`, `ChunkToolUseDelta`,
+`ChunkToolUseEnd`, `ChunkUsage`, `ChunkEnd`. See godoc for the full
+chunk struct.
 
-```go
-// Options
-func New(opts ...Option) (provider.Provider, error)
+**`Response`** is the aggregated outcome returned by `step.LLMCall`
+(not by `Provider.Stream` directly). Fields: `Text`, `ToolUses`,
+`TurnID`, `StopReason`, `Usage`, `CostUSD`, `RawResponseHash`,
+`ProviderReqID`. `TurnID` is minted by `step.LLMCall` and stamped onto
+downstream `ToolCall`s for correlation.
 
-type Option func(*config)
+**Provider implementer contract:**
 
-func WithAPIKey(key string) Option
-func WithBaseURL(url string) Option         // e.g. "https://api.groq.com/openai/v1"
-func WithHTTPClient(c *http.Client) Option
-func WithOrganization(org string) Option    // OpenAI-only; ignored by compat providers
-func WithProviderID(id string) Option       // overrides Info().ID (default "openai"); useful when a compat backend wants a distinct identifier in the event log
-func WithAPIVersion(v string) Option        // overrides Info().APIVersion (default "v1")
-```
+- `Stream` MUST emit exactly one `ChunkEnd` at the end of a successful
+  stream, carrying `StopReason` and `RawResponseHash` (BLAKE3 over the
+  canonical provider response bytes).
+- `UsageUpdate.OutputTokens` semantics differ by vendor (OpenAI:
+  final-only when `include_usage`; Anthropic: cumulative). `Response`
+  normalizes the final value.
+- Mid-stream errors MUST propagate through `Next`; the step layer will
+  not emit `AssistantMessageCompleted` in that case.
 
-Requests always set `stream_options: {include_usage: true}` so the final SSE chunk carries token usage. Budget enforcement on OpenAI-family providers is best-effort: because usage only arrives on the terminal chunk, mid-stream caps fall back to a tiktoken-based local estimate of emitted output tokens.
+### 5.2 Shipped adapters
 
-### 4.2 `starling/provider/anthropic` (M3 — deferred)
-
-```go
-// Options
-func New(opts ...Option) (provider.Provider, error)
-
-type Option func(*config)
-
-func WithAPIKey(key string) Option
-func WithHTTPClient(c *http.Client) Option
-func WithBaseURL(url string) Option
-func WithAPIVersion(v string) Option  // default: "2023-06-01"
-```
+- `provider/openai` — covers OpenAI Chat Completions and every
+  OpenAI-compatible endpoint (Azure, Groq, Together, OpenRouter,
+  Ollama, vLLM, llama.cpp server, DeepSeek, Fireworks, Mistral compat
+  mode, etc.). Compat backends are unlocked by `WithBaseURL` — no
+  separate adapter per vendor. Options: `WithAPIKey`, `WithBaseURL`,
+  `WithHTTPClient`, `WithOrganization`, `WithProviderID`,
+  `WithAPIVersion`. Requests always set
+  `stream_options.include_usage: true`; mid-stream budget caps fall
+  back to a tiktoken local estimate because usage arrives only on the
+  terminal chunk.
+- `provider/anthropic` — Anthropic Messages API. Options: `WithAPIKey`,
+  `WithBaseURL`, `WithHTTPClient`, `WithProviderID`, `WithAPIVersion`
+  (default `2023-06-01`).
 
 ---
 
-## 5. `starling/tool`
+## 6. `starling/tool`
 
 ```go
 type Tool interface {
@@ -443,147 +276,110 @@ type Tool interface {
     Schema() json.RawMessage
     Execute(ctx context.Context, input json.RawMessage) (json.RawMessage, error)
 }
-
-// Generic helper. Users write typed Go functions; Typed wraps them as Tools.
-// Schema is generated via reflection on In at construction time.
-func Typed[In, Out any](name, description string, fn func(context.Context, In) (Out, error)) Tool
 ```
 
-Usage:
+**Implementer contract:**
 
-```go
-type WeatherInput struct {
-    City string `json:"city"`
-}
+- `Name` MUST be stable for the lifetime of the process and unique
+  within an `Agent.Tools` slice (the agent rejects duplicates at
+  `Run`).
+- `Schema` MUST be a JSON Schema describing the `input` shape.
+- `Execute` MUST be context-respectful; a panic is caught and
+  classified as `panic` in the event log.
 
-type WeatherOutput struct {
-    Temperature float64 `json:"temperature"`
-    Condition   string  `json:"condition"`
-}
+`Typed[In, Out any](name, desc, fn) Tool` wraps a typed Go function,
+generating `Schema` via reflection on `In` at construction time.
 
-weatherTool := tool.Typed(
-    "get_weather",
-    "Get the current weather for a city.",
-    func(ctx context.Context, in WeatherInput) (WeatherOutput, error) {
-        return WeatherOutput{Temperature: 72, Condition: "sunny"}, nil
-    },
-)
-```
-
-### 5.1 `starling/tool/builtin` (M1 demo set)
-
-```go
-// Fetches an HTTP URL with a 15s timeout. Returns {status, body}; body is
-// capped at 1 MiB (oversize bodies are truncated without error).
-func Fetch() tool.Tool
-
-// Reads a local file under baseDir. Rejects paths that escape baseDir
-// (via "..", absolute paths, or symlinks). Returns contents as string.
-// Files larger than 1 MiB return an error rather than silently truncating.
-func ReadFile(baseDir string) tool.Tool
-```
+`tool/builtin` ships two demo tools: `Fetch()` (15s HTTP GET, 1 MiB
+body cap with silent truncation) and `ReadFile(baseDir)` (path-escape
+rejection; 1 MiB hard error).
 
 ---
 
-## 6. `starling/step`
+## 7. `starling/step`
 
-The determinism-enforcing API. Normally invoked from the default agent loop; advanced users calling it directly must ensure they're inside an agent run.
+The determinism-enforcing primitives. Normally invoked by the default
+agent loop; direct callers must be inside a run with a `*Context`
+attached via `WithContext`.
 
-```go
-// Context is the opaque per-run state. Owns the event log, run ID,
-// provider/tool/budget dependencies, and the hash-chain cursor every
-// emitted event advances. Safe for concurrent use across the step
-// helpers.
-type Context struct { /* opaque */ }
+- `NewContext(cfg Config) (*Context, error)` — primes the first event
+  slot (`seq=1`, `prevHash=nil`). Returns an error (does **not**
+  panic) when required config is missing.
+- `WithContext(parent, c) context.Context` / `From(ctx) (*Context, bool)` —
+  attach and retrieve.
+- `LLMCall(ctx, req) (*provider.Response, error)` — one streaming
+  completion, emits `TurnStarted → (ReasoningEmitted)* →
+  AssistantMessageCompleted`. Enforces input-token budget pre-call and
+  output / USD caps mid-stream.
+- `CallTool(ctx, ToolCall) (json.RawMessage, error)` — single-tool
+  dispatch. Emits `ToolCallScheduled` then either `ToolCallCompleted`
+  or `ToolCallFailed`; classifies failures as `tool`, `panic`, or
+  `cancelled`. Unknown tools return `ErrToolNotFound`.
+- `CallTools(ctx, []ToolCall) ([]ToolResult, error)` — parallel
+  dispatch with a semaphore (`Config.MaxParallelTools` or
+  `DefaultMaxParallelTools`). Emits Scheduled for every call up front,
+  Completed/Failed in real completion order. A failing tool does NOT
+  cancel siblings; its error lives in the corresponding
+  `ToolResult.Err`. Under `ModeReplay`, calls run sequentially to
+  match recorded seq order.
+- `Now(ctx)`, `Random(ctx)`, `SideEffect[T](ctx, name, fn)` —
+  deterministic wrappers that record on live runs and replay the
+  recorded value on replay. `SideEffect.fn` MUST be safe to skip on
+  replay.
 
-// Config bundles everything NewContext needs. Log and RunID are
-// required; Provider is required for LLMCall; Tools is required for
-// CallTool. Budget is optional — a zero-valued BudgetConfig disables
-// the pre-call input-token cap.
-type Config struct {
-    Log      eventlog.EventLog
-    RunID    string
-    Provider provider.Provider
-    Tools    *Registry
-    Budget   BudgetConfig
-}
+`Registry` maps tool name → `tool.Tool`. `Names()` is alphabetical so
+`RunStarted.ToolRegistryHash` is stable.
 
-// BudgetConfig is the subset of budget caps step enforces. The full
-// Budget struct (wall-clock, USD, output-token caps) arrives with T11.
-type BudgetConfig struct {
-    MaxInputTokens int64 // 0 means unlimited
-}
-
-// Sentinel errors callers (and the agent loop) route on with errors.Is.
-var ErrBudgetExceeded = errors.New("step: budget exceeded")
-var ErrToolNotFound   = errors.New("step: tool not found")
-
-// NewContext primes a Context to emit the first event of a run (seq=1,
-// prevHash=nil). Panics if cfg.Log is nil or cfg.RunID is empty.
-// Provider and Tools are validated lazily by LLMCall and CallTool.
-func NewContext(cfg Config) *Context
-
-// RunID returns the run identifier this Context was constructed with.
-func (c *Context) RunID() string
-
-// WithContext attaches c to parent so downstream step calls can reach it.
-func WithContext(parent context.Context, c *Context) context.Context
-
-// From extracts the Context previously attached via WithContext. Returns
-// (nil, false) when no Context is attached.
-func From(ctx context.Context) (*Context, bool)
-
-// Now returns the current time, recorded to the log on live runs and replayed on replay.
-func Now(ctx context.Context) time.Time
-
-// Random returns a uniform random uint64 from the run's deterministic source.
-func Random(ctx context.Context) uint64
-
-// SideEffect runs fn once, records the return value, and returns recorded value on replay.
-// fn must be safe to skip on replay.
-func SideEffect[T any](ctx context.Context, name string, fn func() (T, error)) (T, error)
-
-// LLMCall performs one streaming completion against the configured
-// Provider, enforcing Budget.MaxInputTokens pre-call and emitting
-// TurnStarted → (ReasoningEmitted)* → AssistantMessageCompleted.
-// Returns ErrBudgetExceeded (and emits BudgetExceeded) when the
-// pre-call estimate exceeds the cap. On mid-stream error, returns
-// the error unchanged without emitting AssistantMessageCompleted.
-func LLMCall(ctx context.Context, req *provider.Request) (*provider.Response, error)
-
-// ToolCall describes a tool invocation. CallID carries the LLM's
-// assigned identifier so the full Planned → Scheduled → Completed
-// chain links back to AssistantMessageCompleted; empty CallID is
-// auto-minted as a ULID. TurnID is required for correlation.
-type ToolCall struct {
-    CallID string
-    TurnID string
-    Name   string
-    Args   json.RawMessage
-}
-
-// CallTool dispatches the requested tool against the Registry in the
-// Context, emits ToolCallScheduled before invocation and either
-// ToolCallCompleted or ToolCallFailed after, and classifies failures
-// into {"tool", "panic", "cancelled"} per EVENTS.md §3.8. Unknown
-// tools produce Scheduled+Failed and return ErrToolNotFound.
-func CallTool(ctx context.Context, call ToolCall) (json.RawMessage, error)
-
-// Registry maps tool names to tool.Tool implementations for a single
-// run. Constructed once at run start and shared across goroutines.
-type Registry struct { /* opaque */ }
-
-func NewRegistry(tools ...tool.Tool) *Registry
-func (r *Registry) Get(name string) (tool.Tool, bool)
-func (r *Registry) Names() []string // alphabetical; stable for RunStarted.ToolRegistryHash
-
-// Deferred to M2: CallTools (parallel errgroup variant). Design preserved
-// in plan docs; not shipped in M1.
-```
+Sentinels: `ErrBudgetExceeded`, `ErrToolNotFound`,
+`ErrReplayMismatch` (wrapped into `ErrNonDeterminism` at the agent
+level).
 
 ---
 
-## 7. Worked example — hello agent
+## 8. `starling/replay`
+
+```go
+type Factory func(ctx context.Context) (Agent, error)
+```
+
+`Factory` builds a fresh agent for one replay attempt — constructed
+per session so each replay starts from a clean slate. `Agent` /
+`StreamingAgent` are the interfaces the agent must satisfy; the root
+`*starling.Agent` satisfies both.
+
+`Stream(ctx, factory, log, runID) (<-chan ReplayStep, error)` runs the
+recorded log through a fresh agent and emits one `ReplayStep` per
+recorded event (`Index`, `Recorded`, `Produced`, `Diverged`,
+`DivergenceReason`). The channel closes on clean finish, divergence,
+or ctx cancel.
+
+The replay path is strict and side-effect-free: the recording is the
+oracle. There are no public option toggles; a cache-miss-falls-back-to-
+live mode is roadmap.
+
+---
+
+## 9. `starling/inspect`
+
+The inspector is a reusable `http.Handler`; the `cmd/starling-inspect`
+binary is a shim around `inspect.New`.
+
+- `New(store eventlog.EventLog, opts...) (*Server, error)` — `store`
+  must also satisfy `eventlog.RunLister`.
+- `Server` implements `http.Handler`; `ReplayEnabled()` reports whether
+  a replay factory is wired in.
+- `WithReplayer(factory replay.Factory)` — enables the Replay UI.
+  Without it the inspector is read-only and the Replay button is
+  hidden.
+- `WithAuth(Authenticator)` — gates every request (pages, HTMX
+  fragments, live-tail SSE, replay endpoints) before the mux. Returning
+  false yields 401. `BearerAuth(token)` is the one built-in;
+  comparison is constant-time and an empty token panics (pass `nil` to
+  `WithAuth` for no auth).
+
+---
+
+## 10. Worked example
 
 ```go
 package main
@@ -593,44 +389,29 @@ import (
     "fmt"
     "log"
     "os"
-    "time"
 
     "github.com/jerkeyray/starling"
+    "github.com/jerkeyray/starling/event"
     "github.com/jerkeyray/starling/eventlog"
     "github.com/jerkeyray/starling/provider/openai"
     "github.com/jerkeyray/starling/tool"
     "github.com/jerkeyray/starling/tool/builtin"
 )
 
-type TimeInput struct{}
-type TimeOutput struct {
-    ISO8601 string `json:"iso8601"`
-}
-
 func main() {
     ctx := context.Background()
 
     prov, err := openai.New(openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
     if err != nil { log.Fatal(err) }
-    // For an OpenAI-compatible provider (Groq, Ollama, vLLM, …), add WithBaseURL:
-    //   openai.New(openai.WithAPIKey(k), openai.WithBaseURL("https://api.groq.com/openai/v1"))
-
-    currentTime := tool.Typed(
-        "current_time",
-        "Return the current time in ISO8601.",
-        func(ctx context.Context, _ TimeInput) (TimeOutput, error) {
-            return TimeOutput{ISO8601: time.Now().UTC().Format(time.RFC3339)}, nil
-        },
-    )
+    // For an OpenAI-compatible endpoint (Groq, Ollama, vLLM, ...):
+    //   openai.New(openai.WithAPIKey(k),
+    //       openai.WithBaseURL("https://api.groq.com/openai/v1"))
 
     agent := &starling.Agent{
         Provider: prov,
-        Tools:    []tool.Tool{currentTime, builtin.Fetch()},
+        Tools:    []tool.Tool{builtin.Fetch()},
         Log:      eventlog.NewInMemory(),
-        Budget: &starling.Budget{
-            MaxOutputTokens: 2000,
-            MaxUSD:          0.10,
-        },
+        Budget:   &starling.Budget{MaxOutputTokens: 2000, MaxUSD: 0.10},
         Config: starling.Config{
             Model:        "gpt-4o-mini",
             SystemPrompt: "You are a helpful assistant.",
@@ -638,214 +419,58 @@ func main() {
         },
     }
 
+    // Blocking API.
     result, err := agent.Run(ctx, "What time is it in Tokyo?")
-    if err != nil {
-        log.Fatalf("run failed: %v", err)
+    if err != nil { log.Fatal(err) }
+    fmt.Printf("run %s: %s\n", result.RunID, result.FinalText)
+
+    // Or: stream events live.
+    runID, events, err := agent.Stream(ctx, "do the thing")
+    if err != nil { log.Fatal(err) }
+    _ = runID
+    for se := range events {
+        switch se.Kind {
+        case event.KindAssistantMessageCompleted:
+            fmt.Println("assistant:", se.Text)
+        case event.KindToolCallScheduled:
+            fmt.Printf("tool: %s (%s)\n", se.Tool, se.CallID)
+        case event.KindRunFailed, event.KindRunCancelled:
+            fmt.Println("terminal:", se.Err)
+        }
     }
 
-    fmt.Printf("Run %s: %s\n", result.RunID, result.FinalText)
-    fmt.Printf("Cost: $%.4f, %d turns, %d tool calls\n",
-        result.TotalCostUSD, result.TurnCount, result.ToolCallCount)
-
-    // Later: inspect every event
-    events, _ := agent.Log.Read(ctx, result.RunID)
-    for _, ev := range events {
-        fmt.Printf("  %d %s\n", ev.Seq, ev.Kind)
-    }
-
-    // Later: verify the run is reproducible.
+    // Verify the run is reproducible.
     if err := starling.Replay(ctx, agent.Log, result.RunID, agent); err != nil {
-        log.Fatalf("replay failed: %v", err)
-    }
-}
-```
-
----
-
-## 8. Streaming example
-
-`Agent.Stream` starts a run and returns a channel of `StepEvent`s:
-
-```go
-runID, events, err := a.Stream(ctx, "do the thing")
-if err != nil {
-    log.Fatal(err)
-}
-for se := range events {
-    switch se.Kind {
-    case event.KindAssistantMessageCompleted:
-        fmt.Println("assistant:", se.Text)
-    case event.KindToolCallScheduled:
-        fmt.Printf("tool: %s (%s)\n", se.Tool, se.CallID)
-    case event.KindRunCompleted:
-        fmt.Println("done:", se.Text)
-    case event.KindRunFailed, event.KindRunCancelled:
-        fmt.Println("terminal:", se.Err)
-    }
-}
-_ = runID
-```
-
-Terminal events are always the last item on the channel before it
-closes. Consumers should drain promptly; the channel buffer is 64 and
-the underlying `eventlog.Stream` may drop slow subscribers (the
-channel still closes cleanly in that case).
-
----
-
-## 8a. `starling/replay`
-
-The replay package powers both `(*Agent).RunReplay` and the
-inspector's replay UI.
-
-```go
-// Agent is the minimum interface a replay-capable agent must satisfy.
-type Agent interface {
-    RunReplay(ctx context.Context, recorded []event.Event) error
-}
-
-// StreamingAgent additionally exposes the sink-based variant used by
-// Stream below.
-type StreamingAgent interface {
-    Agent
-    RunReplayInto(ctx context.Context, recorded []event.Event, sink eventlog.EventLog) error
-}
-
-// Factory builds a fresh Agent for one replay attempt. Constructed
-// per session so each replay starts from a clean slate.
-type Factory func(ctx context.Context) (Agent, error)
-
-// ReplayStep is one row of the side-by-side timeline produced by Stream.
-type ReplayStep struct {
-    Index            uint64
-    Recorded         event.Event
-    Produced         event.Event
-    Diverged         bool
-    DivergenceReason string
-}
-
-// Stream runs the recorded log under runID through factory's agent and
-// emits one ReplayStep per recorded event. The channel closes when the
-// replay finishes (clean run, divergence, or context cancel).
-func Stream(ctx context.Context, factory Factory, log eventlog.EventLog, runID string) (<-chan ReplayStep, error)
-```
-
----
-
-## 8b. `starling/inspect`
-
-The inspector ships as a reusable `http.Handler`. The standalone binary
-under `cmd/starling-inspect` is a thin shim around `inspect.New`.
-
-```go
-// New builds the inspector handler. store must also implement
-// eventlog.RunLister; New returns an error otherwise.
-func New(store eventlog.EventLog, opts ...Option) (*Server, error)
-
-type Server struct { /* opaque http.Handler */ }
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request)
-func (s *Server) ReplayEnabled() bool
-
-// WithReplayer wires in a replay.Factory so the inspector can spawn
-// replay sessions on demand. Without it the inspector is read-only
-// and the Replay button is hidden.
-func WithReplayer(factory replay.Factory) Option
-```
-
-### 8b.1 Dual-mode CLI helper (root package)
-
-Most users don't instantiate `inspect.New` directly — they embed the
-inspector as a subcommand of their own agent binary so the *same*
-factory that builds the runtime agent is available for replay:
-
-```go
-// InspectCommand returns a CLI-style entrypoint. factory may be nil,
-// in which case the inspector runs read-only (no Replay button).
-func InspectCommand(factory replay.Factory) *InspectCmd
-
-type InspectCmd struct {
-    Factory replay.Factory // nil = view-only
-    Name    string         // used in usage/error messages; default "inspect"
-    Output  io.Writer      // logs + flag errors; default os.Stderr
-}
-
-// Run parses args, opens the log read-only, starts the HTTP server
-// on --addr (default 127.0.0.1:0), optionally opens the browser
-// (--no-open to skip), and blocks until SIGINT/SIGTERM.
-func (c *InspectCmd) Run(args []string) error
-```
-
-Minimal dual-mode wiring:
-
-```go
-if len(os.Args) > 1 && os.Args[1] == "inspect" {
-    cmd := starling.InspectCommand(replay.Factory(buildAgent))
-    if err := cmd.Run(os.Args[2:]); err != nil {
         log.Fatal(err)
     }
-    return
 }
-// ... normal run path ...
 ```
 
-See `examples/m1_hello` for a complete working binary and
-`docs/REPLAY_DEBUGGING.md` for the workflow.
-
-### 8b.2 Runtime CLI helpers (root package)
-
-The `cmd/starling` binary bundles four subcommands over any local
-SQLite event log. Each command is also exposed as a root-package
-helper so dual-mode binaries can host the same subcommands alongside
-a user-built `replay.Factory`.
-
-```go
-// ValidateCommand runs eventlog.Validate against one run (or every
-// run in the log) and prints per-run status. Read-only.
-func ValidateCommand() *ValidateCmd
-type ValidateCmd struct { Name string; Output io.Writer }
-func (c *ValidateCmd) Run(args []string) error // args: <db> [<runID>]
-
-// ExportCommand dumps one run as NDJSON (one line per event,
-// envelope + typed payload). Read-only.
-func ExportCommand() *ExportCmd
-type ExportCmd struct { Name string; Output io.Writer }
-func (c *ExportCmd) Run(args []string) error // args: <db> <runID>
-
-// ReplayCommand headlessly replays one run and prints OK or
-// DIVERGED. factory may be nil, in which case Run errors with a
-// dual-mode-guidance message — the stock `cmd/starling` binary
-// uses that path.
-func ReplayCommand(factory replay.Factory) *ReplayCmd
-type ReplayCmd struct { Factory replay.Factory; Name string; Output io.Writer }
-func (c *ReplayCmd) Run(args []string) error // args: <db> <runID>
-```
-
-Stock binary vs dual-mode: the shipped `cmd/starling` passes nil
-factories to `ReplayCommand` and `InspectCommand`, which is
-sufficient for `validate`, `export`, and view-only `inspect`.
-Users who need `replay` from the CLI (or `Replay` from the
-inspector UI) build a small main.go that dispatches to the same
-helpers with a real factory wired in.
+See `examples/` for more complete binaries, including dual-mode
+`inspect` wiring.
 
 ---
 
-## 9. Design constraints reflected in the API
+## 11. Design constraints
 
-- **Root package exports exactly 10 types.** Counted: `Agent`, `Config`, `Budget`, `RunResult`, `StepEvent`, `ToolError`, `ProviderError`, + 5 sentinel errors (counted as one group). Room to spare.
-- **No sealed interfaces.** All interfaces are user-implementable.
-- **No hidden globals.** No `Init()`, no hub object.
-- **`context.Context` first parameter everywhere.**
-- **All errors wrap with `%w`.** `errors.Is`, `errors.As` are the only discriminators users need.
-- **Zero-value agents are usable** after supplying Provider, Log, and Config — Budget and Tracer are optional.
+- **No sealed interfaces.** Every interface is user-implementable.
+- **No hidden globals, no `Init()`, no hub object.**
+- **`context.Context` first on every exported function.**
+- **All errors wrap with `%w`.** `errors.Is` / `errors.As` are the only
+  discriminators users need.
+- **Zero-value agents are usable** once `Provider`, `Log`, and
+  `Config.Model` are set. Everything else has a sane default.
+- **Event log is the source of truth.** `RunResult`, `Stream`,
+  metrics, and the inspector are all derived views.
 
 ---
 
-## 10. What's deliberately missing (non-goals — see PRD §9)
+## 12. Non-goals
 
-- No prompt templating (write Go strings)
-- No vector stores (write a Tool)
-- No multi-agent coordination
-- No chain/flow DSL
-- No HTTP server wrapper
-- No built-in retry policies (tools/providers wrap themselves)
-- No hub/registry global
+- No prompt templating — write Go strings.
+- No vector stores — write a `Tool`.
+- No multi-agent coordination.
+- No chain/flow DSL.
+- No HTTP server wrapper around `Agent`.
+- No built-in retry policies (tools and providers wrap themselves).
+- No hub/registry global.

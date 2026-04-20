@@ -32,9 +32,10 @@ res, err := agent.ResumeWith(ctx, runID, "", opts...)         // with options
 res, err := agent.Resume(ctx, runID, "please try the other API") // inject a user message
 ```
 
-Both calls return a `RunResult` whose `Events` field covers the full
-merged history — everything from the original process plus everything
-the resuming process appended.
+Both calls return a `RunResult` summarising the resumed run (terminal
+kind, turn count, token totals, Merkle root). The full merged event
+history — original process plus resuming process — lives in the event
+log; call `a.Log.Read(ctx, runID)` to retrieve it.
 
 Error sentinels (in `errors.go`):
 - `ErrRunNotFound` — no events for `runID`.
@@ -121,10 +122,12 @@ turn-count cap; it's a seam marker that makes the log legible.
 - `MaxTokens` / `MaxCostUSD` reset at the process boundary for
   **inline enforcement** — the step-level counters start at zero in
   the resumed process, so a resumed run can consume up to one
-  process's worth of budget before tripping. The `RunResult.Stats`
-  returned by Resume *is* cumulative (it aggregates every event in
-  the merged log), and terminal-event payloads reflect the full run,
-  so post-hoc accounting is still correct. If you need a hard
+  process's worth of budget before tripping. The `RunResult` returned
+  by Resume *is* cumulative — its `TurnCount`, `InputTokens`,
+  `OutputTokens`, `ToolCallCount`, and `TotalCostUSD` fields aggregate
+  every event in the merged log — and terminal-event payloads reflect
+  the full run, so post-hoc accounting is still correct. If you need a
+  hard
   cumulative cap, subtract the pre-resume usage from the budget
   before calling Resume.
 
@@ -163,5 +166,5 @@ res, err := agent.Run(ctx, goal)
 agent := &starling.Agent{Provider: p, Log: db, Config: cfg}
 res, err := agent.Resume(ctx, previousRunID, "")
 // res.TerminalKind == RunCompleted (or whatever the resumed portion ends with)
-// res.Events carries the full merged history
+// Full merged history: events, _ := db.Read(ctx, previousRunID)
 ```
