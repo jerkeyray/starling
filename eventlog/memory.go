@@ -183,61 +183,59 @@ func (m *memoryLog) Stream(ctx context.Context, runID string) (<-chan event.Even
 
 	ch := make(chan event.Event, streamBufferSize)
 
-	// Two phases: history catch-up, then live tail. Previously, runs
-	// with more than streamBufferSize events were silently truncated to
-	// the first 256 and the channel closed — a real data-loss bug for
-	// the inspector / replay UI, which is the exact tool that needs to
-	// see long runs. We now deliver every historical event by pumping
-	// from a goroutine, then register as a live subscriber so any
-	// further Appends are fanned out.
+	// Subscribe-then-deliver-history. The subscriber is registered
+	// synchronously under the lock so any Append issued after this
+	// Stream call returns is guaranteed to reach ch — that's the
+	// contract replay.Stream and the inspector rely on (subscribe BEFORE
+	// the producer starts emitting; lose nothing).
 	//
-	// Trade-off: events appended *during* the history pump are not
-	// delivered. The use cases that drove this fix (inspector, replay)
-	// always Stream completed runs, so there is nothing to miss; live
-	// tail of an in-progress run from a stream subscriber that joins
-	// late is best-effort by design. Callers that need exact
-	// "history + live" semantics for in-flight runs should Read once
-	// then Stream from the next-expected Seq.
+	// History delivery has two regimes:
+	//
+	//   - History fits in the channel buffer: deliver inline under the
+	//     lock. Cheap, ordered, no goroutine.
+	//
+	//   - History overflows the buffer: pump from a goroutine. This
+	//     used to truncate to the first streamBufferSize events and
+	//     close the channel — a real data-loss bug for long runs, which
+	//     are exactly the runs the inspector/replay UI is meant to make
+	//     visible. Now every event is delivered. Caveat: when the
+	//     producer keeps Appending while the history pump is still
+	//     running, the live events may interleave with late history
+	//     events on ch. Strict "history first then live" ordering is
+	//     only guaranteed when nothing is appending concurrently — the
+	//     case both replay.Stream (empty sink at subscribe time) and
+	//     the inspector (completed runs) actually use.
 	history := make([]event.Event, len(rs.events))
 	copy(history, rs.events)
+
+	if len(history) <= cap(ch) {
+		for _, ev := range history {
+			ch <- ev
+		}
+	}
+	rs.subscribers = append(rs.subscribers, ch)
 	m.mu.Unlock()
 
-	// One goroutine owns ch's lifecycle: pump history, then register
-	// for live tail, then wait for ctx.Done to unregister and close.
-	// Keeping it single-owner avoids a race where a separate cancel
-	// watcher fires after history is done but before the registration
-	// goroutine takes the lock, leaving ch leaked.
+	// Cancel watcher: unregister and close ch on ctx.Done. Idempotent
+	// against the slow-consumer drop path in Append.
 	go func() {
-		for _, ev := range history {
-			select {
-			case ch <- ev:
-			case <-ctx.Done():
-				closeChanOnce(ch, m, runID)
-				return
-			}
-		}
-		// Register as a live subscriber.
-		m.mu.Lock()
-		if m.closed {
-			m.mu.Unlock()
-			// Close() already closed (or will close) every known
-			// subscriber; ch was never registered, so close it ourselves.
-			safeClose(ch)
-			return
-		}
-		rs, ok := m.runs[runID]
-		if !ok {
-			m.mu.Unlock()
-			safeClose(ch)
-			return
-		}
-		rs.subscribers = append(rs.subscribers, ch)
-		m.mu.Unlock()
-
-		// Wait for ctx cancellation and unsubscribe.
 		<-ctx.Done()
 		closeChanOnce(ch, m, runID)
 	}()
+
+	// Long-history pump runs concurrently when history overflowed the
+	// buffer. See the comment above for the ordering trade-off.
+	if len(history) > cap(ch) {
+		go func() {
+			for _, ev := range history {
+				select {
+				case ch <- ev:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 
 	return ch, nil
 }

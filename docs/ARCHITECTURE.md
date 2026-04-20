@@ -189,7 +189,7 @@ type EventLog interface {
 }
 ```
 
-M1: `eventlog.NewInMemory()`. M2: `eventlog.NewSQLite(path)` (default durable) and `eventlog.NewPostgres(db)` (for users with existing Postgres). M3+: users implement for custom backends (Pebble, BadgerDB, S3, etc.) — pluggable via the interface.
+Shipped: `eventlog.NewInMemory()` (M1) and `eventlog.NewSQLite(path)` (M2, the default durable backend). A Postgres backend (`NewPostgres`) is on the roadmap but not yet implemented. Custom backends (Pebble, BadgerDB, S3, etc.) plug in via the interface.
 
 The log is write-once from `step`'s perspective — `step` appends, never updates. Reads are allowed from anywhere (inspect-while-running, replay, audit).
 
