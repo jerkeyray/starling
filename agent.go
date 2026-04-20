@@ -705,13 +705,6 @@ func toolDefs(tools []tool.Tool) []provider.ToolDefinition {
 	return defs
 }
 
-func budgetInputCap(b *Budget) int64 {
-	if b == nil {
-		return 0
-	}
-	return b.MaxInputTokens
-}
-
 // budgetStepConfig projects the full Agent.Budget onto the step-level
 // BudgetConfig (input/output tokens + USD). Wall-clock is intentionally
 // omitted — it's enforced at the agent level via context.WithDeadline.
