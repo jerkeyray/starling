@@ -13,9 +13,9 @@ import (
 
 func TestStatusOf(t *testing.T) {
 	cases := []struct {
-		k          event.Kind
-		wantLabel  string
-		wantClass  string
+		k         event.Kind
+		wantLabel string
+		wantClass string
 	}{
 		{event.KindRunCompleted, "completed", "ok"},
 		{event.KindRunFailed, "failed", "err"},
@@ -105,10 +105,10 @@ func TestSummarize(t *testing.T) {
 		return event.Event{Kind: kind, Payload: b}
 	}
 	cases := []struct {
-		name        string
-		ev          event.Event
-		wantPrefix  string
-		wantCallID  string
+		name       string
+		ev         event.Event
+		wantPrefix string
+		wantCallID string
 	}{
 		{"RunStarted", mk(event.KindRunStarted, event.RunStarted{ModelID: "gpt-4o-mini"}), "model=gpt-4o-mini", ""},
 		{"ToolCallScheduled", mk(event.KindToolCallScheduled, event.ToolCallScheduled{CallID: "c1", ToolName: "fetch"}), "tool=fetch call=c1", "c1"},
@@ -143,9 +143,9 @@ func TestSummarizeNewlineCollapsed(t *testing.T) {
 
 func TestShortHex(t *testing.T) {
 	cases := map[string]string{
-		"":             "",
-		"abcdef":       "abcdef",
-		"abcdefabcdef": "abcdefabcdef",
+		"":              "",
+		"abcdef":        "abcdef",
+		"abcdefabcdef":  "abcdefabcdef",
 		"abcdefabcdef0": "abcdefabcdef…",
 	}
 	for in, want := range cases {

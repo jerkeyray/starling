@@ -5,10 +5,17 @@
 // guard.
 //
 // The collector set is fixed — no user-defined labels, no dynamic
-// series — so cardinality is bounded by construction. Label values
-// come from closed enums documented next to each field: a stray
-// tool name or a bespoke error string never leaks into the scrape
-// output.
+// series at runtime. Label values are either closed enums (status,
+// error_type, kind, axis, type) or caller-bounded names (model,
+// tool) that come from the Agent's configured provider/registry.
+// Cardinality is therefore bounded by the caller's static config,
+// not by anything the running agent can invent per-request: a
+// stray tool name or a bespoke error string never leaks into the
+// scrape output.
+//
+// Callers who dynamically mint tool names per request (an unusual
+// pattern) should pre-hash or bucket the name before adding it to
+// Agent.Tools, or register a dedicated registry per tenant.
 
 package starling
 
@@ -26,22 +33,22 @@ import (
 // result to Agent.Metrics. The zero value is not usable — nil is
 // the "disabled" sentinel.
 type Metrics struct {
-	runsStarted      prometheus.Counter
-	runsInFlight     prometheus.Gauge
-	runTerminal      *prometheus.CounterVec   // labels: status, error_type
-	runDuration      *prometheus.HistogramVec // labels: status
+	runsStarted  prometheus.Counter
+	runsInFlight prometheus.Gauge
+	runTerminal  *prometheus.CounterVec   // labels: status, error_type
+	runDuration  *prometheus.HistogramVec // labels: status
 
 	providerCalls    *prometheus.CounterVec   // labels: model, status
 	providerDuration *prometheus.HistogramVec // labels: model
 	providerTokens   *prometheus.CounterVec   // labels: model, type
 
-	toolCalls        *prometheus.CounterVec   // labels: tool, status, error_type
-	toolDuration     *prometheus.HistogramVec // labels: tool
+	toolCalls    *prometheus.CounterVec   // labels: tool, status, error_type
+	toolDuration *prometheus.HistogramVec // labels: tool
 
 	eventlogAppends  *prometheus.CounterVec   // labels: kind, status
 	eventlogDuration *prometheus.HistogramVec // labels: kind
 
-	budgetExceeded   *prometheus.CounterVec // labels: axis
+	budgetExceeded *prometheus.CounterVec // labels: axis
 }
 
 // NewMetrics registers every collector against reg and returns a
@@ -259,4 +266,3 @@ func (s metricsStepSink) ObserveEventlogAppend(kind, status string, d time.Durat
 func (s metricsStepSink) ObserveBudgetExceeded(axis string) {
 	s.m.onBudgetExceeded(axis)
 }
-

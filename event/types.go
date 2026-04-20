@@ -111,17 +111,17 @@ type ReasoningEmitted struct {
 // captures the full assistant output plus authoritative token counts, cost,
 // and a hash of the raw provider response.
 type AssistantMessageCompleted struct {
-	TurnID            string             `cbor:"turn_id" json:"turn_id"`
-	Text              string             `cbor:"text" json:"text"`
-	ToolUses          []PlannedToolUse   `cbor:"tool_uses,omitempty" json:"tool_uses,omitempty"`
-	StopReason        string             `cbor:"stop_reason" json:"stop_reason"`
-	InputTokens       int64              `cbor:"input_tokens" json:"input_tokens"`
-	OutputTokens      int64              `cbor:"output_tokens" json:"output_tokens"`
-	CacheReadTokens   int64              `cbor:"cache_read_tokens,omitempty" json:"cache_read_tokens,omitempty"`
-	CacheCreateTokens int64              `cbor:"cache_create_tokens,omitempty" json:"cache_create_tokens,omitempty"`
-	CostUSD           float64            `cbor:"cost_usd" json:"cost_usd"`
-	RawResponseHash   []byte             `cbor:"raw_response_hash" json:"raw_response_hash"`
-	ProviderRequestID string             `cbor:"provider_request_id,omitempty" json:"provider_request_id,omitempty"`
+	TurnID            string           `cbor:"turn_id" json:"turn_id"`
+	Text              string           `cbor:"text" json:"text"`
+	ToolUses          []PlannedToolUse `cbor:"tool_uses,omitempty" json:"tool_uses,omitempty"`
+	StopReason        string           `cbor:"stop_reason" json:"stop_reason"`
+	InputTokens       int64            `cbor:"input_tokens" json:"input_tokens"`
+	OutputTokens      int64            `cbor:"output_tokens" json:"output_tokens"`
+	CacheReadTokens   int64            `cbor:"cache_read_tokens,omitempty" json:"cache_read_tokens,omitempty"`
+	CacheCreateTokens int64            `cbor:"cache_create_tokens,omitempty" json:"cache_create_tokens,omitempty"`
+	CostUSD           float64          `cbor:"cost_usd" json:"cost_usd"`
+	RawResponseHash   []byte           `cbor:"raw_response_hash" json:"raw_response_hash"`
+	ProviderRequestID string           `cbor:"provider_request_id,omitempty" json:"provider_request_id,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -205,11 +205,11 @@ type BudgetExceeded struct {
 // ContextTruncated records context-window management trimming prior messages.
 // Strategy names the approach used (e.g. "drop_oldest", "summarize").
 type ContextTruncated struct {
-	Strategy        string `cbor:"strategy" json:"strategy"`
-	TokensBefore    int64  `cbor:"tokens_before" json:"tokens_before"`
-	TokensAfter     int64  `cbor:"tokens_after" json:"tokens_after"`
-	MessagesBefore  uint32 `cbor:"messages_before" json:"messages_before"`
-	MessagesAfter   uint32 `cbor:"messages_after" json:"messages_after"`
+	Strategy       string `cbor:"strategy" json:"strategy"`
+	TokensBefore   int64  `cbor:"tokens_before" json:"tokens_before"`
+	TokensAfter    int64  `cbor:"tokens_after" json:"tokens_after"`
+	MessagesBefore uint32 `cbor:"messages_before" json:"messages_before"`
+	MessagesAfter  uint32 `cbor:"messages_after" json:"messages_after"`
 }
 
 // ---------------------------------------------------------------------------

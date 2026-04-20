@@ -43,8 +43,8 @@ func (s *fakeStream) Close() error {
 }
 
 type fakeProvider struct {
-	stream *fakeStream
-	info   provider.Info
+	stream  *fakeStream
+	info    provider.Info
 	openErr error
 }
 

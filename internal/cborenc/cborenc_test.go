@@ -14,15 +14,15 @@ type inner struct {
 }
 
 type wide struct {
-	I64   int64             `cbor:"i64"`
-	U64   uint64            `cbor:"u64"`
-	Str   string            `cbor:"str"`
-	Bytes []byte            `cbor:"bytes"`
-	List  []int             `cbor:"list"`
-	Map   map[string]int    `cbor:"map"`
-	Sub   inner             `cbor:"sub"`
-	Subs  []inner           `cbor:"subs"`
-	Nest  map[string]inner  `cbor:"nest"`
+	I64   int64            `cbor:"i64"`
+	U64   uint64           `cbor:"u64"`
+	Str   string           `cbor:"str"`
+	Bytes []byte           `cbor:"bytes"`
+	List  []int            `cbor:"list"`
+	Map   map[string]int   `cbor:"map"`
+	Sub   inner            `cbor:"sub"`
+	Subs  []inner          `cbor:"subs"`
+	Nest  map[string]inner `cbor:"nest"`
 }
 
 func sample() wide {

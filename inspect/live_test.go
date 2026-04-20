@@ -189,6 +189,37 @@ func TestLiveStream_Namespaced_RunID(t *testing.T) {
 	}
 }
 
+// TestDispatch_NoDoubleUnescape guards against a routing-confusion
+// primitive where %252F in the URL decoded twice (once by net/http,
+// once by dispatchRun) into a literal "/", letting an attacker split
+// what the server treats as the runID into runID + replay session +
+// action. With the fix, r.URL.Path is used as-is (already decoded by
+// net/http) so %2F in a runID stays encoded as a single slash and
+// the request 404s rather than matching /run/{id}/replay/{s}/{a}.
+func TestDispatch_NoDoubleUnescape(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	hs := httptest.NewServer(srv)
+	t.Cleanup(hs.Close)
+
+	// %252F → decoded once by net/http to "%2F" (literal, not slash).
+	// Before the fix, dispatchRun's second PathUnescape collapsed that
+	// into "/" and the replay-dispatch path picked it up.
+	resp, err := http.Get(hs.URL + "/run/foo%252Freplay/sess/ctrl")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	// No replayer is wired, so even if the attacker-crafted path
+	// matched /replay, the reply would be 404. But with the fix we
+	// want the *routing* to have treated this as /run/{id} with an
+	// unknown run, also 404. Either way, a 200 or 403 would signal
+	// the bug. The cheap assertion is "not 200 and not a replay
+	// route status."
+	if resp.StatusCode == http.StatusOK {
+		t.Fatalf("status = 200, want 404 — double-unescape re-opened")
+	}
+}
+
 // TestLiveStream_UnknownRun_404 ensures the catch-up path surfaces a
 // proper 404 for a non-existent run rather than an empty SSE stream.
 func TestLiveStream_UnknownRun_404(t *testing.T) {

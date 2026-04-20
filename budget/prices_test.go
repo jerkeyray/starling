@@ -20,8 +20,8 @@ func TestCostUSD_Known(t *testing.T) {
 
 func TestCostUSD_Claude(t *testing.T) {
 	cases := []struct {
-		model              string
-		wantIn, wantOut    float64
+		model           string
+		wantIn, wantOut float64
 	}{
 		{"claude-opus-4-7", 5.00, 25.00},
 		{"claude-sonnet-4-6", 3.00, 15.00},

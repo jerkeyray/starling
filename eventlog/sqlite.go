@@ -357,10 +357,10 @@ func (s *sqliteLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 	var out []RunSummary
 	for rows.Next() {
 		var (
-			runID    string
+			runID     string
 			startedTs int64
-			lastSeq  int64
-			lastKind int64
+			lastSeq   int64
+			lastKind  int64
 		)
 		if err := rows.Scan(&runID, &startedTs, &lastSeq, &lastKind); err != nil {
 			return nil, fmt.Errorf("eventlog/sqlite: list runs scan: %w", err)

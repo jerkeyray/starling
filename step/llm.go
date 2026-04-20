@@ -3,10 +3,10 @@ package step
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	cryptorand "crypto/rand"
 	"io"
 	"sync"
 	"time"

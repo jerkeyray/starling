@@ -16,7 +16,6 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 
@@ -120,8 +119,12 @@ func (s *Server) routes() {
 // dispatcher peels known suffixes from the right rather than splitting
 // on the first slash. Replay routes 404 when no Replayer is configured.
 func (s *Server) dispatchRun(w http.ResponseWriter, r *http.Request) {
-	rest, err := url.PathUnescape(r.URL.Path[len("/run/"):])
-	if err != nil || rest == "" {
+	// r.URL.Path is already percent-decoded by net/http; decoding again
+	// would collapse %2F into "/" and let an attacker split a runID
+	// (which legitimately contains "/" when Namespace is set) into
+	// a runID + session + action triple for dispatchReplaySession.
+	rest := r.URL.Path[len("/run/"):]
+	if rest == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -212,7 +215,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.ensureCSRFCookie(w, r)
-	if isReplayPOST(r) && !s.checkCSRF(r) {
+	// Guard every unsafe method rather than enumerating paths — a new
+	// POST route added to the mux is CSRF-protected by default instead
+	// of silently bypassing until someone remembers to update the
+	// allowlist. Safe methods (GET/HEAD/OPTIONS) don't mutate.
+	if isUnsafeMethod(r.Method) && !s.checkCSRF(r) {
 		http.Error(w, "bad csrf token", http.StatusForbidden)
 		return
 	}

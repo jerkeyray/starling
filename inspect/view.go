@@ -118,19 +118,19 @@ type validationView struct {
 
 // eventDetail is the right-pane payload of /run/{id}/event/{seq}.
 type eventDetail struct {
-	RunID        string
-	Seq          uint64
-	SeqLabel     string
-	Kind         string
-	Family       string
-	Time         string
-	TimeISO      string
-	HashHex      string // hex of event.Hash(event.Marshal(ev)); short + full
-	HashShort    string
-	PrevHashHex  string
+	RunID         string
+	Seq           uint64
+	SeqLabel      string
+	Kind          string
+	Family        string
+	Time          string
+	TimeISO       string
+	HashHex       string // hex of event.Hash(event.Marshal(ev)); short + full
+	HashShort     string
+	PrevHashHex   string
 	PrevHashShort string
-	CallID       string
-	JSON         string // pretty-printed event.ToJSON output
+	CallID        string
+	JSON          string // pretty-printed event.ToJSON output
 }
 
 // kindFamily groups event kinds by visual category so the timeline

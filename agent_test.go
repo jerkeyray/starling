@@ -699,4 +699,3 @@ func kindsEq(a, b []event.Kind) bool {
 	}
 	return true
 }
-

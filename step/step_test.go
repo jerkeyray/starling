@@ -206,4 +206,3 @@ func mustMarshal(t *testing.T, ev event.Event) []byte {
 	}
 	return b
 }
-

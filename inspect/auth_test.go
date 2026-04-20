@@ -251,12 +251,13 @@ func TestCSRF_GETExempt(t *testing.T) {
 	}
 }
 
-// TestCSRF_NonReplayPOST guards the predicate: POSTs outside the
-// /replay path tree should fall through to the mux without CSRF
-// interception. There are no non-replay POSTs today, so "fall
-// through" means the mux's existing 404 — the key negative is that
-// we do NOT see 403.
-func TestCSRF_NonReplayPOST(t *testing.T) {
+// TestCSRF_UnsafeMethodGuarded guards the CSRF posture: every
+// unsafe method (POST/PUT/PATCH/DELETE) on every path requires a
+// valid token, so a future mutating route added to the mux is
+// protected by default instead of silently bypassing. An
+// unauthenticated POST to a non-existent path must 403 on CSRF,
+// not 404 on the mux — the CSRF check runs before routing.
+func TestCSRF_UnsafeMethodGuarded(t *testing.T) {
 	hs, _ := csrfServer(t)
 
 	resp, err := http.Post(hs.URL+"/nonexistent", "application/json", nil)
@@ -264,8 +265,8 @@ func TestCSRF_NonReplayPOST(t *testing.T) {
 		t.Fatalf("POST: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode == http.StatusForbidden {
-		t.Errorf("non-replay POST rejected as CSRF; predicate is over-matching")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("POST without CSRF = %d, want 403", resp.StatusCode)
 	}
 }
 

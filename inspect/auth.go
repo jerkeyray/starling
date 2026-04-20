@@ -91,24 +91,18 @@ func (s *Server) checkCSRF(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(h), []byte(c.Value)) == 1
 }
 
-// isReplayPOST matches the two state-changing replay endpoints:
-//
-//	POST /run/{id}/replay
-//	POST /run/{id}/replay/{session}/control
-//
-// Kept as a string predicate rather than a routing table so middleware
-// can classify without re-parsing the path. {id} may contain "/" but
-// "/replay" only appears in these two routes, so a simple Contains
-// check suffices.
-func isReplayPOST(r *http.Request) bool {
-	if r.Method != http.MethodPost {
+// isUnsafeMethod reports whether m mutates state and therefore needs
+// CSRF protection. Mirrors RFC 7231's "safe methods" list inverted:
+// GET, HEAD, OPTIONS are safe; everything else (POST, PUT, PATCH,
+// DELETE, and any future verb) is unsafe by default. The
+// fail-closed posture means a new mutating route added to the mux is
+// CSRF-guarded automatically.
+func isUnsafeMethod(m string) bool {
+	switch m {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, "":
 		return false
 	}
-	p := r.URL.Path
-	if !strings.HasPrefix(p, "/run/") {
-		return false
-	}
-	return strings.Contains(p, "/replay")
+	return true
 }
 
 // newCSRFToken returns 32 random bytes, base64-url encoded. Panics on

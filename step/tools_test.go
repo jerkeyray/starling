@@ -44,9 +44,9 @@ type blockingTool struct {
 	wake chan struct{}
 }
 
-func (b *blockingTool) Name() string              { return "blocker" }
-func (b *blockingTool) Description() string       { return "blocks until ctx cancelled" }
-func (b *blockingTool) Schema() json.RawMessage   { return json.RawMessage(`{"type":"object"}`) }
+func (b *blockingTool) Name() string            { return "blocker" }
+func (b *blockingTool) Description() string     { return "blocks until ctx cancelled" }
+func (b *blockingTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (b *blockingTool) Execute(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
 	select {
 	case <-ctx.Done():
@@ -60,9 +60,9 @@ func (b *blockingTool) Execute(ctx context.Context, _ json.RawMessage) (json.Raw
 // bypass it to exercise step's own recover).
 type panickyTool struct{}
 
-func (panickyTool) Name() string              { return "panicky" }
-func (panickyTool) Description() string       { return "panics" }
-func (panickyTool) Schema() json.RawMessage   { return json.RawMessage(`{"type":"object"}`) }
+func (panickyTool) Name() string            { return "panicky" }
+func (panickyTool) Description() string     { return "panics" }
+func (panickyTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (panickyTool) Execute(context.Context, json.RawMessage) (json.RawMessage, error) {
 	panic("kaboom")
 }
@@ -394,9 +394,9 @@ type flakyTool struct {
 	count int32
 }
 
-func (f *flakyTool) Name() string              { return f.name }
-func (f *flakyTool) Description() string       { return "flaky" }
-func (f *flakyTool) Schema() json.RawMessage   { return json.RawMessage(`{"type":"object"}`) }
+func (f *flakyTool) Name() string            { return f.name }
+func (f *flakyTool) Description() string     { return "flaky" }
+func (f *flakyTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (f *flakyTool) Execute(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {
 	n := atomic.AddInt32(&f.count, 1)
 	if n <= f.failN {

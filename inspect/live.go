@@ -162,4 +162,3 @@ func (s *Server) emitLiveError(w http.ResponseWriter, flusher http.Flusher, msg 
 	_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", quoteJSON(msg))
 	flusher.Flush()
 }
-

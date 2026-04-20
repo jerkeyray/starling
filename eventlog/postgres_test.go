@@ -314,4 +314,3 @@ func TestPostgres_ConcurrentAppendsDifferentRunsParallel(t *testing.T) {
 	}
 	t.Logf("elapsed: %v (runs=%d perRun=%d)", time.Since(start), runs, perRun)
 }
-
