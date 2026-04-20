@@ -36,9 +36,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.62.2
+          # v2 is required: v1 binaries are built against Go 1.23/1.24
+          # and refuse to load a module targeting Go 1.26.
+          version: latest
 
   # govulncheck — reachability-aware scan of stdlib + deps.
   vuln:

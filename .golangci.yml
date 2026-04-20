@@ -1,4 +1,6 @@
-# golangci-lint configuration.
+version: "2"
+
+# golangci-lint configuration (v2 schema).
 #
 # Conservative linter set — enough to catch the classes of drift this
 # repo has actually suffered (gofmt drift, swallowed errors, stale
@@ -10,52 +12,55 @@ run:
   tests: true
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - govet
     - staticcheck
     - errcheck
     - gosec
     - revive
-    - gofmt
-    - goimports
     - unused
     - ineffassign
     - misspell
-
-linters-settings:
-  revive:
-    # Light config: keep the exported-doc rule (catches future API
-    # drift) but turn off unused-parameter (too noisy for interface
-    # implementations).
+  settings:
+    revive:
+      rules:
+        # Keep the exported-doc rule: catches future API drift.
+        - name: exported
+          severity: warning
+          disabled: false
+        # Too noisy for interface implementations.
+        - name: unused-parameter
+          disabled: true
+        - name: package-comments
+          disabled: true
+    gosec:
+      excludes:
+        # G104 overlaps with errcheck; let errcheck own it.
+        - G104
+    misspell:
+      locale: US
+  exclusions:
+    paths:
+      - examples
+      - internal
     rules:
-      - name: exported
-        severity: warning
-        disabled: false
-      - name: unused-parameter
-        disabled: true
-      - name: package-comments
-        disabled: true
-  gosec:
-    excludes:
-      # G104 overlaps with errcheck; let errcheck own it.
-      - G104
-  misspell:
-    locale: US
+      # Test helpers don't need godoc on every exported symbol.
+      - path: _test\.go
+        linters:
+          - revive
+        text: exported
+      # Fuzz/bench scaffolding sometimes has intentionally-ignored errs.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+# Formatters (gofmt/goimports) moved out of `linters` in v2.
+formatters:
+  enable:
+    - gofmt
+    - goimports
 
 issues:
-  exclude-dirs:
-    - examples
-    - internal
-  exclude-rules:
-    # Test helpers don't need godoc on every exported symbol.
-    - path: _test\.go
-      linters:
-        - revive
-      text: "exported"
-    # Fuzz/bench scaffolding sometimes has intentionally-ignored errs.
-    - path: _test\.go
-      linters:
-        - errcheck
   max-issues-per-linter: 0
   max-same-issues: 0
