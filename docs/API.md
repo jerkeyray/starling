@@ -25,6 +25,7 @@ page does not re-list every field.
 | `starling/provider/openai`         | OpenAI Chat Completions + every OpenAI-compatible endpoint       |
 | `starling/provider/anthropic`      | Anthropic Messages adapter                                       |
 | `starling/provider/gemini`         | Google Gemini adapter (Gemini API backend; Vertex AI deferred)   |
+| `starling/provider/openrouter`     | OpenRouter adapter (thin wrapper over `provider/openai`)         |
 | `starling/tool`                    | `Tool` interface, `Typed[In,Out]` reflective helper              |
 | `starling/tool/builtin`            | Small demo tool set (`Fetch`, `ReadFile`)                        |
 | `starling/step`                    | Determinism-enforcing primitives: `LLMCall`, `CallTool`, etc.    |
@@ -274,6 +275,13 @@ downstream `ToolCall`s for correlation.
   Usage arrives only on the terminal stream chunk. Only the Gemini API
   backend is wired today; Vertex AI (OAuth / ADC auth) is a deferred
   follow-up.
+- `provider/openrouter` — OpenRouter (`openrouter.ai/api/v1`). Thin
+  wrapper over `provider/openai` that sets the base URL, the default
+  provider ID (`"openrouter"`), and optional attribution headers
+  (`HTTP-Referer`, `X-Title`) via `WithHTTPReferer` / `WithXTitle`.
+  Options: `WithAPIKey`, `WithBaseURL`, `WithHTTPReferer`, `WithXTitle`,
+  `WithHTTPClient`, `WithProviderID`. Streaming, tool calls, and usage
+  accounting are inherited from the OpenAI adapter unchanged.
 
 ---
 
