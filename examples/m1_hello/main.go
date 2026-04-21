@@ -33,6 +33,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"time"
@@ -44,7 +45,12 @@ import (
 	"github.com/jerkeyray/starling/provider/anthropic"
 	"github.com/jerkeyray/starling/provider/openai"
 	"github.com/jerkeyray/starling/replay"
+	"github.com/jerkeyray/starling/step"
 	"github.com/jerkeyray/starling/tool"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // defaultDB is where "run" writes and where "inspect" reads by default.
@@ -62,8 +68,10 @@ func currentTimeTool() tool.Tool {
 	return tool.Typed(
 		"current_time",
 		"Return the current UTC time in RFC3339.",
-		func(_ context.Context, _ clockIn) (clockOut, error) {
-			return clockOut{UTC: time.Now().UTC().Format(time.RFC3339)}, nil
+		func(ctx context.Context, _ clockIn) (clockOut, error) {
+			// step.Now records the timestamp on the original run and
+			// replays the recorded value, so the tool is replay-safe.
+			return clockOut{UTC: step.Now(ctx).UTC().Format(time.RFC3339)}, nil
 		},
 	)
 }
@@ -86,6 +94,8 @@ func dispatch(args []string) error {
 		return runAgent(args[1:])
 	case "inspect":
 		return runInspect(args[1:])
+	case "replay":
+		return runReplay(args[1:])
 	case "-h", "--help", "help":
 		printUsage()
 		return nil
@@ -99,6 +109,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  m1_hello run               # run the agent; events → "+defaultDB)
 	fmt.Fprintln(os.Stderr, "  m1_hello inspect [db]      # open the inspector with replay (default db: "+defaultDB+")")
+	fmt.Fprintln(os.Stderr, "  m1_hello replay <db> <id>  # headless replay verification (exits nonzero on drift)")
 }
 
 // ----------------------------------------------------------------------
@@ -106,6 +117,9 @@ func printUsage() {
 // ----------------------------------------------------------------------
 
 func runAgent(_ []string) error {
+	shutdownOtel := maybeInstallOtel()
+	defer shutdownOtel()
+
 	a, err := buildAgent(context.Background())
 	if err != nil {
 		return err
@@ -164,6 +178,17 @@ func runInspect(args []string) error {
 	return cmd.Run(args)
 }
 
+// runReplay re-executes a recorded run headlessly and prints whether it
+// matches byte-for-byte. Useful for CI / smoke tests.
+func runReplay(args []string) error {
+	factory := replay.Factory(func(ctx context.Context) (replay.Agent, error) {
+		return buildAgent(ctx)
+	})
+	cmd := starling.ReplayCommand(factory)
+	cmd.Name = "m1_hello replay"
+	return cmd.Run(args)
+}
+
 // ----------------------------------------------------------------------
 // shared construction
 // ----------------------------------------------------------------------
@@ -185,15 +210,38 @@ func buildAgent(_ context.Context) (*starling.Agent, error) {
 		return nil, fmt.Errorf("open log: %w", err)
 	}
 
+	cfg := starling.Config{
+		Model:    model,
+		MaxTurns: 4,
+	}
+	if os.Getenv("DEBUG") == "1" {
+		cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+
 	return &starling.Agent{
 		Provider: prov,
 		Tools:    []tool.Tool{currentTimeTool()},
 		Log:      log,
-		Config: starling.Config{
-			Model:    model,
-			MaxTurns: 4,
-		},
+		Config:   cfg,
 	}, nil
+}
+
+// maybeInstallOtel wires a stdout trace exporter when OTEL=1. Spans are
+// printed as pretty JSON to stderr. Returns a shutdown func that
+// flushes pending spans; no-op when OTEL is off.
+func maybeInstallOtel() func() {
+	if os.Getenv("OTEL") != "1" {
+		return func() {}
+	}
+	exp, err := stdouttrace.New(stdouttrace.WithPrettyPrint(), stdouttrace.WithWriter(os.Stderr))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "otel stdout exporter:", err)
+		return func() {}
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp))
+	otel.SetTracerProvider(tp)
+	fmt.Fprintln(os.Stderr, "observability: OTEL stdout exporter on")
+	return func() { _ = tp.Shutdown(context.Background()) }
 }
 
 // buildProvider picks between OpenAI (default) and Anthropic based on

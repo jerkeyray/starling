@@ -4,7 +4,7 @@
 
 DB ?= /tmp/starling-demo.db
 
-.PHONY: help build vet test lint vuln fmt-check check demo-inspect inspect
+.PHONY: help build vet test lint vuln fmt-check check demo-inspect inspect smoke
 
 help:
 	@echo "Targets:"
@@ -17,6 +17,7 @@ help:
 	@echo "  check         - vet + fmt-check + lint + vuln + test (pre-push gate)"
 	@echo "  demo-inspect  - seed $(DB) and launch starling-inspect against it"
 	@echo "  inspect       - launch starling-inspect against an existing DB (DB=...)"
+	@echo "  smoke         - no-key end-to-end smoke test (CLI + inspector HTTP)"
 
 build:
 	go build ./...
@@ -50,3 +51,9 @@ demo-inspect:
 #   make inspect DB=/path/to/runs.db
 inspect:
 	go run ./cmd/starling-inspect $(DB)
+
+# End-to-end smoke test. No API key needed — seeds a throwaway DB,
+# exercises the CLI, and probes every inspector HTTP route. Exits
+# nonzero on the first failure.
+smoke:
+	./scripts/smoke.sh

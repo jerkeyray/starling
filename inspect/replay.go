@@ -67,6 +67,11 @@ type replaySession struct {
 	id    string
 	runID string
 
+	// startPaused seeds each runOnce attempt (including restarts) with
+	// paused=true so short replays don't blow past the user before
+	// step/resume can be clicked. Set via ?paused=1 on the start POST.
+	startPaused bool
+
 	out     chan sessionFrame  // goroutine → SSE consumer
 	control chan replayCommand // SSE consumer → goroutine
 
@@ -170,12 +175,13 @@ func (s *Server) handleReplayStart(w http.ResponseWriter, r *http.Request, runID
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	sess := &replaySession{
-		id:      id,
-		runID:   runID,
-		out:     make(chan sessionFrame, stepBuffer),
-		control: make(chan replayCommand, 4),
-		cancel:  cancel,
-		done:    make(chan struct{}),
+		id:          id,
+		runID:       runID,
+		startPaused: r.URL.Query().Get("paused") == "1",
+		out:         make(chan sessionFrame, stepBuffer),
+		control:     make(chan replayCommand, 4),
+		cancel:      cancel,
+		done:        make(chan struct{}),
 	}
 	sess.touch()
 	s.sessions[id] = sess
@@ -366,8 +372,9 @@ func (s *replaySession) runOnce(ctx context.Context, factory replay.Factory, log
 	}
 
 	// Per-attempt control state. Resets on restart so a paused
-	// previous attempt doesn't carry over.
-	paused := false
+	// previous attempt doesn't carry over (except for the session-level
+	// startPaused opt-in, which is meant to apply to every attempt).
+	paused := s.startPaused
 	credits := 0 // step commands credited while paused
 
 	for {

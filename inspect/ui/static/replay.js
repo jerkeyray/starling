@@ -170,7 +170,9 @@
 
   async function startSession() {
     setStatus("starting…", "init");
-    const resp = await fetch("/run/" + encodeURIComponent(cfg.runID) + "/replay", {
+    // Server starts paused so short replays don't rip past the user
+    // before step/resume can be clicked.
+    const resp = await fetch("/run/" + encodeURIComponent(cfg.runID) + "/replay?paused=1", {
       method:  "POST",
       headers: {
         "Content-Type":  "application/json",
@@ -185,9 +187,9 @@
     }
     const body = await resp.json();
     sessionID = body.session_id;
-    paused = false;
+    paused = true;
     setControlsRunning();
-    setStatus("running", "ok");
+    setStatus("paused", "warn");
     openStream();
   }
 
