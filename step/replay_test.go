@@ -70,10 +70,20 @@ func TestReplay_NowReturnsRecordedValues(t *testing.T) {
 			t1.UnixNano(), t2.UnixNano(), t3.UnixNano())
 	}
 
-	// Replay must not emit any events itself.
+	// Replay re-emits each recorded SideEffectRecorded into the sink so
+	// the re-executed chain byte-matches the original. Verify the
+	// kinds and payloads line up with the recording.
 	out, _ := log.Read(context.Background(), "replay")
-	if len(out) != 0 {
-		t.Fatalf("replay emitted %d events, want 0", len(out))
+	if len(out) != len(evs) {
+		t.Fatalf("replay emitted %d events, want %d", len(out), len(evs))
+	}
+	for i, ev := range out {
+		if ev.Kind != event.KindSideEffectRecorded {
+			t.Fatalf("out[%d].Kind = %s, want SideEffectRecorded", i, ev.Kind)
+		}
+		if string(ev.Payload) != string(evs[i].Payload) {
+			t.Fatalf("out[%d].Payload mismatch", i)
+		}
 	}
 }
 
@@ -154,11 +164,61 @@ func TestReplay_ExhaustedStreamPanics(t *testing.T) {
 		if r == nil {
 			t.Fatalf("expected panic on exhausted stream")
 		}
-		if !strings.Contains(fmt.Sprint(r), "no SideEffectRecorded remaining") {
+		if !strings.Contains(fmt.Sprint(r), "replay stream exhausted") {
 			t.Fatalf("unexpected panic: %v", r)
 		}
 	}()
 	_ = step.Now(ctx)
+}
+
+// TestReplay_NdetHelperAdvancesChain is the regression test for the
+// bug where step.Now (and siblings) didn't advance nextSeq in replay,
+// causing the next real emit to see a stale SideEffectRecorded slot.
+// A recorded [SideEffectRecorded, RunCompleted] replay must reach the
+// RunCompleted emit without an ErrReplayMismatch.
+func TestReplay_NdetHelperAdvancesChain(t *testing.T) {
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+	rec := step.MustNewContext(step.Config{Log: log, RunID: "rec"})
+	recCtx := step.WithContext(context.Background(), rec)
+
+	_ = step.Now(recCtx)
+	if err := step.Emit(recCtx, rec, event.KindRunCompleted, event.RunCompleted{FinalText: "ok"}); err != nil {
+		t.Fatalf("Emit RunCompleted: %v", err)
+	}
+	evs, err := log.Read(context.Background(), "rec")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(evs) != 2 || evs[0].Kind != event.KindSideEffectRecorded || evs[1].Kind != event.KindRunCompleted {
+		t.Fatalf("unexpected recording: %+v", evs)
+	}
+
+	sink := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = sink.Close() })
+	rp := step.MustNewContext(step.Config{
+		Log:      sink,
+		RunID:    "replay",
+		Mode:     step.ModeReplay,
+		Recorded: evs,
+		ClockFn:  func() time.Time { panic("clock used in replay") },
+	})
+	rpCtx := step.WithContext(context.Background(), rp)
+
+	_ = step.Now(rpCtx)
+	if err := step.Emit(rpCtx, rp, event.KindRunCompleted, event.RunCompleted{FinalText: "ok"}); err != nil {
+		t.Fatalf("replay Emit RunCompleted: %v (pre-fix: ErrReplayMismatch because Now did not advance nextSeq)", err)
+	}
+
+	out, _ := sink.Read(context.Background(), "replay")
+	if len(out) != len(evs) {
+		t.Fatalf("replay sink got %d events, want %d", len(out), len(evs))
+	}
+	for i, ev := range out {
+		if ev.Kind != evs[i].Kind || string(ev.Payload) != string(evs[i].Payload) {
+			t.Fatalf("out[%d] diverges from recording", i)
+		}
+	}
 }
 
 func TestReplay_ErrReplayMismatchIsExported(t *testing.T) {

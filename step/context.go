@@ -30,12 +30,12 @@ type Context struct {
 	tools    *Registry
 	budget   BudgetConfig
 
-	// Replay mode: helpers (Now/Random/SideEffect) scan
-	// recorded[replayIdx:] instead of running their effect.
-	mode      Mode
-	recorded  []event.Event
-	replayIdx int
-	clockFn   func() time.Time
+	// Replay mode: helpers (Now/Random/SideEffect) peek the next
+	// recorded event at nextSeq-1 and re-emit it so the replayed
+	// chain matches the recording byte-for-byte.
+	mode     Mode
+	recorded []event.Event
+	clockFn  func() time.Time
 
 	// Caps concurrent tool execution; 0 → DefaultMaxParallelTools.
 	maxParallelTools int
