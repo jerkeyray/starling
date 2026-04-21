@@ -1,14 +1,23 @@
 # Starling — Architecture
 
-> Package layout, data flow, and module boundaries for v0.
-> Last updated: apr 2026
+> Current package layout, runtime data flow, and subsystem boundaries.
+> Last updated: Apr 2026
 
 ---
 
 ## 1. Module
 
 Go module: `github.com/jerkeyray/starling`
-Go version minimum: 1.23 (for `iter.Seq2` in `Agent.Stream`)
+Minimum Go version: 1.26+
+
+Starling is a Go agent runtime built around an append-only event log.
+Every run is recorded as typed events with a BLAKE3 hash chain and a
+Merkle-rooted terminal event. The core product shape is:
+
+- run an agent
+- persist every step as events
+- validate / inspect that log later
+- replay the run against the same agent wiring and detect divergence
 
 ---
 
@@ -16,169 +25,171 @@ Go version minimum: 1.23 (for `iter.Seq2` in `Agent.Stream`)
 
 ```
 starling/
-├── go.mod
-├── agent.go                    # root package: Agent, Run*, Config
-├── error.go                    # sentinel errors
+├── agent.go                # Agent, run loop, terminal/result assembly
+├── config.go               # Config and Budget re-export
+├── errors.go               # root sentinel / typed errors
+├── stream.go               # Agent.Stream live API
+├── resume.go               # Resume / ResumeWith
+├── replay_api.go           # package-level Replay helper
+├── inspect_command.go      # dual-mode inspector CLI entrypoint
+├── *_command.go            # validate/export/replay CLI helpers
 ├── event/
-│   ├── event.go                # Event type, type constants
-│   ├── types.go                # payload structs per event kind
-│   ├── hash.go                 # BLAKE3 chain helpers
-│   └── encoding.go             # CBOR canonical marshal/unmarshal
+│   ├── event.go            # envelope + Kind
+│   ├── types.go            # typed payload structs
+│   ├── encoding.go         # canonical CBOR encode/decode
+│   ├── hash.go             # event hash helpers
+│   └── payload_json.go     # event.ToJSON projection
 ├── eventlog/
-│   ├── eventlog.go             # EventLog interface
-│   ├── memory.go               # in-memory implementation (M1)
-│   ├── sqlite.go               # SQLite-backed (M2, default durable)
-│   ├── postgres.go             # Postgres-backed (M2, for existing infra)
-│   └── conformance.go          # shared test suite every backend must pass
+│   ├── eventlog.go         # EventLog, RunLister, RunSummary
+│   ├── memory.go           # in-memory backend
+│   ├── sqlite.go           # durable local backend
+│   ├── postgres.go         # durable multi-host backend
+│   └── validate.go         # hash-chain / merkle validation
 ├── provider/
-│   ├── provider.go             # Provider, Request, Response, EventStream interfaces
-│   ├── openai/                 # M1 — OpenAI + OpenAI-compatible via WithBaseURL
-│   │   ├── openai.go           # OpenAI Chat Completions adapter
-│   │   └── stream.go           # SSE delta → StreamChunk mapping
-│   └── anthropic/              # M3 — deferred
-│       ├── anthropic.go        # Anthropic adapter
-│       └── stream.go           # streaming adapter + token counting
+│   ├── provider.go         # Provider interface and normalized stream types
+│   ├── openai/             # OpenAI + compatible endpoints
+│   ├── anthropic/          # Anthropic Messages API
+│   ├── gemini/             # Gemini API backend
+│   └── openrouter/         # thin wrapper over provider/openai
 ├── tool/
-│   ├── tool.go                 # Tool interface
-│   ├── typed.go                # tool.Typed[In, Out] generic helper
-│   └── builtin/
-│       ├── fetch.go            # HTTP fetch tool (demo)
-│       └── readfile.go         # file read tool (demo)
+│   ├── tool.go             # Tool interface
+│   ├── typed.go            # tool.Typed helper
+│   └── builtin/            # demo/reference tools
 ├── step/
-│   ├── step.go                 # Now, Random, SideEffect, LLMCall, CallTool
-│   └── context.go              # run context handle
-├── budget/
-│   ├── budget.go               # Budget struct, enforcer
-│   └── tokens.go               # per-provider token counting
+│   ├── context.go          # run-scoped execution context
+│   ├── llm.go              # step.LLMCall
+│   ├── tools.go            # step.CallTool / CallTools
+│   └── step.go             # deterministic helpers (Now, Random, SideEffect)
 ├── replay/
-│   ├── replay.go               # state-faithful replay
-│   └── cache.go                # re-execution cache (opt-in)
-├── internal/
-│   └── cborenc/                # canonical CBOR helpers (private)
+│   ├── replay.go           # verify/replay plumbing
+│   └── stream.go           # side-by-side replay streaming
+├── inspect/
+│   ├── server.go           # inspector handler and routing
+│   ├── handlers.go         # HTTP handlers
+│   ├── live.go             # live-tail SSE
+│   ├── replay.go           # replay UI/session plumbing
+│   └── ui/                 # embedded templates + static assets
 └── examples/
-    └── code-review/
-        └── main.go             # demo agent (M4)
+    ├── m1_hello/
+    └── m4_inspector_demo/
 ```
 
-### 2.1 Public root package (≤ 10 exported types)
+### 2.1 Public root package
 
-1. `Agent` — configured agent, owns Run/Resume/Replay/Stream methods
-2. `Config` — agent configuration
-3. `Budget` — cost budget (re-exported from `budget`)
-4. `RunResult` — terminal run state
-5. `StepEvent` — user-facing event-stream item (from `Agent.Stream`)
-6. `ErrBudgetExceeded`, `ErrNonDeterminism`, `ErrRunNotFound` — sentinel errors
-7. `ToolError`, `ProviderError` — typed error wrappers
+The root package is intentionally small and operator-facing:
 
-Everything else (event types, Provider interface, Tool interface, EventLog interface) lives in subpackages. Users import what they need.
+- `Agent`, `Config`, `Budget`
+- `RunResult`, `StepEvent`
+- `Replay`, `Resume`, `Stream`
+- CLI helpers: `ValidateCommand`, `ExportCommand`, `ReplayCommand`,
+  `InspectCommand`
+- errors: `ErrBudgetExceeded`, `ErrNonDeterminism`, `ErrRunNotFound`,
+  typed wrappers like `ToolError` and `ProviderError`
+
+Most extension points live in subpackages: `provider`, `tool`,
+`eventlog`, `inspect`, `replay`, and `step`.
 
 ---
 
-## 3. Data flow — a single turn
+## 3. Runtime data flow
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          Agent.Run(ctx, goal)                       │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  1. step.NewRun(agent, goal)                                        │
-│     → allocate run_id, open new log, emit RunStarted                │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  2. Agent loop (deterministic code)                                 │
-│                                                                     │
-│     for !done {                                                     │
-│         resp := step.LLMCall(ctx, request)         ─┐ Command       │
-│         if resp.ToolCalls == nil { done = true }    │ → Events      │
-│         outputs := step.CallTools(ctx, calls)       │               │
-│         append tool outputs to context             ─┘               │
-│     }                                                               │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  3. step.LLMCall                                                 │
-│     a. emit TurnStarted event                                       │
-│     b. check budget: can we afford input_tokens?                    │
-│     c. open streaming call to Provider                              │
-│     d. budget watchdog goroutine consumes usage updates             │
-│     e. on budget trip → cancel ctx → emit BudgetExceeded            │
-│     f. on success → emit AssistantMessageCompleted                  │
-│     g. optional: emit ReasoningEmitted if provider returns it       │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  4. step.CallTools                                               │
-│     a. for each tool call: emit ToolCallScheduled                   │
-│     b. errgroup.WithContext → run all tools in parallel             │
-│     c. per tool: emit ToolCallCompleted | ToolCallFailed            │
-│     d. aggregate outputs for next LLM turn                          │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  5. terminal                                                        │
-│     emit RunCompleted | RunFailed | RunCancelled                    │
-│     compute Merkle root over events, include in terminal event      │
-└─────────────────────────────────────────────────────────────────────┘
-```
+### 3.1 `Agent.Run`
+
+`(*Agent).Run(ctx, goal)` is the blocking API:
+
+1. Validate agent configuration.
+2. Mint a RunID (`Namespace + "/" + ULID` when namespaced).
+3. Build a `step.Context` over the configured `EventLog`.
+4. Emit `RunStarted`.
+5. Enter the ReAct loop:
+   - call `step.LLMCall`
+   - if tool calls were planned, execute them with `step.CallTools`
+   - append tool results to the next LLM turn's message history
+6. Emit one terminal event:
+   - `RunCompleted`
+   - `RunFailed`
+   - `RunCancelled`
+7. Re-read the run from the log and materialize `RunResult`.
+
+`RunResult` is a convenience summary. The event log remains the source
+of truth.
+
+### 3.2 `Agent.Stream`
+
+`(*Agent).Stream(ctx, goal)` is the live API:
+
+- subscribe to `EventLog.Stream` before `RunStarted` is emitted
+- run the same runtime as `Run`
+- project raw events into `StepEvent`
+- close the returned channel on terminal event or context cancellation
+
+The API is channel-based. It does not use `iter.Seq` or `iter.Seq2`.
+
+### 3.3 `Resume` and `Replay`
+
+- `Resume` rebuilds run state from recorded events and then continues
+  with real provider/tool calls.
+- `Replay` verifies a completed run against the current agent wiring.
+- `RunReplay` and `RunReplayInto` are the lower-level agent methods
+  used by the root helper and the inspector replay UI.
+
+Resume is for continuation after interruption. Replay is for proving
+determinism and surfacing divergence.
 
 ---
 
 ## 4. Core boundaries
 
-### 4.1 Agent loop boundary
+### 4.1 Agent boundary
 
-The agent loop is a pure function `(ctx, step.Context, input) → commands`. It runs inside `step.NewRun`. Rules:
+`Agent` owns orchestration, not storage or provider details. It wires
+the configured `Provider`, `Tools`, `EventLog`, budgets, metrics, and
+logger into a `step.Context`, then drives the loop.
 
-- No direct I/O, time, randomness
-- No goroutines (the runtime spawns them for parallel tool calls)
-- All side effects via `step.*` functions
-- Must be safe to call repeatedly with the same inputs (replay re-invokes it)
-
-The default loop is a ReAct implementation in `agent.go`. Advanced users can supply a custom loop function via `Config.Loop` (rarely needed; M3+).
+The default loop is the shipped ReAct loop in `agent.go`. There is no
+public `Config.Loop` hook in the current API.
 
 ### 4.2 Step boundary
 
-`step` is the only package that writes to the log. Rules:
+`step` is the runtime layer that turns actions into events. It owns:
 
-- Every event goes through `step.append(ctx, event)` which computes `prev_hash` and invokes `EventLog.Append`
-- Agent-loop code never sees an `EventLog` — only the `step.Context` handle
-- During replay, `step.LLMCall` and `step.CallTool` read recorded outputs instead of calling out; the log is never written
+- `LLMCall`
+- `CallTool` / `CallTools`
+- deterministic helpers: `Now`, `Random`, `SideEffect`
+- replay-aware behavior for those helpers
+
+This is the package that appends runtime events through `EventLog`.
+The agent loop does not compute hashes or mutate the log directly.
 
 ### 4.3 Provider boundary
 
-Providers implement `Provider`:
+Providers implement a normalized streaming interface:
 
 ```go
 type Provider interface {
+    Info() Info
     Stream(ctx context.Context, req *Request) (EventStream, error)
-}
-
-type EventStream interface {
-    Next(ctx context.Context) (StreamChunk, error)  // io.EOF terminates
-    Close() error
-}
-
-type StreamChunk struct {
-    Kind      ChunkKind        // Text | ToolUseStart | ToolUseDelta | ToolUseEnd | Usage | End
-    Text      string
-    ToolUse   *ToolUseChunk
-    Usage     *UsageUpdate     // final-only for OpenAI-family (include_usage: true); cumulative for Anthropic
-    RawResponseHash []byte     // set on End chunks
 }
 ```
 
-The provider emits normalized chunks. Token counting, budget enforcement, and event emission happen in `runtime`, not in the provider. This keeps providers simple and enforcement uniform.
+Adapters translate vendor-specific streaming APIs into normalized
+chunks such as text, reasoning, tool-use fragments, usage, and end.
+Budget enforcement and event emission happen in Starling's runtime, not
+inside provider adapters.
 
-### 4.4 Log boundary
+Shipped adapters today:
 
-`EventLog` is pluggable:
+- `provider/openai`
+- `provider/anthropic`
+- `provider/gemini`
+- `provider/openrouter`
+
+OpenAI-compatible endpoints are still primarily served through
+`provider/openai` with `WithBaseURL`.
+
+### 4.4 Event log boundary
+
+The event log contract is intentionally small:
 
 ```go
 type EventLog interface {
@@ -189,179 +200,149 @@ type EventLog interface {
 }
 ```
 
-Shipped: `eventlog.NewInMemory()` (M1) and `eventlog.NewSQLite(path)` (M2, the default durable backend). A Postgres backend (`NewPostgres`) is on the roadmap but not yet implemented. Custom backends (Pebble, BadgerDB, S3, etc.) plug in via the interface.
+Built-in backends:
 
-The log is write-once from `step`'s perspective — `step` appends, never updates. Reads are allowed from anywhere (inspect-while-running, replay, audit).
+- `eventlog.NewInMemory()`
+- `eventlog.NewSQLite(path, opts...)`
+- `eventlog.NewPostgres(db, opts...)`
 
-### 4.5 Tool boundary
+Enumeration is intentionally separate via `eventlog.RunLister` so
+forwarding/write-only backends are not forced to implement listing.
 
-```go
-type Tool interface {
-    Name() string
-    Description() string
-    Schema() json.RawMessage
-    Execute(ctx context.Context, input json.RawMessage) (json.RawMessage, error)
-}
+#### `Stream` semantics
+
+`EventLog.Stream` is a history-plus-live subscription. It is designed
+for inspection and live observers, not as a total-order replication
+protocol.
+
+Current contract:
+
+- subscribers receive stored events and then newly appended events
+- channel closes on context cancellation, log close, or subscriber
+  overflow
+- under concurrent appends, strict history-then-live ordering is not
+  guaranteed on every backend
+
+Consumers that need exact monotonic processing must track the highest
+`Seq` seen and discard duplicates or out-of-order replays with
+`ev.Seq <= lastSeen`. The inspector live-tail path is the reference
+consumer.
+
+### 4.5 Inspect boundary
+
+`inspect.Server` is a reusable `http.Handler` over an
+`eventlog.EventLog` that also satisfies `eventlog.RunLister`.
+
+It is intentionally read-mostly:
+
+- browse runs
+- inspect event payloads
+- validate hash chains
+- live-tail in-progress runs
+- optionally stream replay steps when a replay factory is wired in
+
+The standalone `cmd/starling-inspect` binary is a thin read-only SQLite
+shim around this library. Replay-from-UI is enabled only when a caller
+ships its own dual-mode binary with `starling.InspectCommand(factory)`.
+
+---
+
+## 5. Concurrency and durability
+
+### 5.1 Agent concurrency
+
+- multiple goroutines may share one `*Agent`
+- each run has its own `step.Context`
+- parallelism inside a run is limited to tool dispatch and provider
+  streaming / budget enforcement
+
+### 5.2 Event durability
+
+Event appends are synchronous. When an emit call returns nil, that
+event has been accepted by the configured backend.
+
+Tradeoff:
+
+- better audit guarantees
+- more sensitivity to slow disks / slow database commits
+
+This is deliberate. Starling does not ship an async write buffer in
+the default path.
+
+### 5.3 Multi-tenant layout
+
+`Agent.Namespace` prefixes RunIDs so one backing log can safely host
+many tenants or applications without schema changes:
+
+```text
+<namespace>/<ulid>
 ```
 
-Tools are non-deterministic (like Temporal Activities). Runtime records their args (in `ToolCallScheduled`) and results (in `ToolCallCompleted`); tool code is free to call networks, read files, etc. On replay, tools are not invoked — recorded results are returned directly.
+Routing, replay, inspector paths, and CLI helpers all treat `/` inside
+RunIDs as normal and suffix-parse from the right where needed.
 
 ---
 
-## 5. Control flow: Run vs Resume vs Replay
+## 6. Observability
 
-### 5.1 Run
+Three layers exist side by side:
 
-Fresh run. New `run_id`. Empty log. Agent loop executes normally; runtime writes events.
+1. Event log
+   The canonical audit trail.
+2. `log/slog`
+   Side-channel operational trace via `Config.Logger`.
+3. OpenTelemetry
+   Spans around run / turn / LLM / tool boundaries.
 
-### 5.2 Resume
-
-Existing `run_id`; log has events; terminal event absent (or user wants to continue past `RunCompleted`). `step` replays the log through the agent loop to rehydrate context, then continues making real LLM/tool calls.
-
-### 5.3 Replay
-
-Existing `run_id`; log is complete. `step` runs the agent loop with `ReplayMode = true`. LLM calls return recorded `AssistantMessageCompleted` payloads; tool calls return recorded results. Each time the loop issues a command, `step` diffs against the next recorded event. Mismatch → `ErrNonDeterminism`.
-
-Replay produces a `RunResult` identical to the original (in state-faithful mode). In re-execution mode, LLM calls go through a response cache; cache miss → call provider.
+Metrics are opt-in through `Agent.Metrics` and the Prometheus helpers
+in the root package.
 
 ---
 
-## 6. Concurrency model
+## 7. Error model
 
-- **One agent run at a time within a `Run()` call.** Internal goroutines exist only for parallel tool calls (`errgroup`) and budget watchdog.
-- **Multiple concurrent runs share an Agent.** `Agent` is stateless; two goroutines can call `agent.Run(ctx, "a")` and `agent.Run(ctx, "b")` safely.
-- **EventLog implementations handle their own concurrency.** `log.Memory` uses `sync.RWMutex`; SQLite uses WAL mode + busy-timeout; Postgres uses per-row locking on `(run_id, seq)`.
-- **Budget watchdog**: a single goroutine per streaming LLM call. Consumes `StreamChunk`s, updates local token counter, calls `cancel()` when budget trips. Joined on stream close.
+- runtime failures become terminal events in the log
+- errors returned to callers still carry the typed/sentinel values
+- replay mismatches surface as `ErrNonDeterminism`
+- read-only logs return `eventlog.ErrReadOnly` on append attempts
+- validation failures wrap `eventlog.ErrLogCorrupt`
 
-### 6.1 Multi-tenant layout
-
-The SQLite backend keys events on `(run_id, seq)` with no separate
-tenant column. Two tenants picking the same raw RunID would collide.
-The `Agent.Namespace` field (added in M3) sidesteps this without a
-schema change: when set, every event written by that agent carries
-`RunID = Namespace + "/" + ULID`, and all lookups use the prefixed
-form. One SQLite file can host many tenants safely as long as each
-agent is constructed with a distinct `Namespace`. Empty namespace
-preserves pre-M3 behavior.
-
-### 6.2 Performance / backpressure
-
-Event appends are **synchronous**. `step.emit` blocks until the log
-backend returns:
-
-- `eventlog.Memory` — in-memory append + fan-out to stream
-  subscribers; effectively non-blocking.
-- `eventlog.SQLite` — `BEGIN IMMEDIATE` + single-row INSERT +
-  `COMMIT`. Under WAL mode this is sub-millisecond on healthy local
-  disk, but a slow or contended disk stalls the emitting goroutine,
-  which in turn stalls the agent turn that called `step.Now` / tool
-  dispatch / `step.LLMCall`.
-
-This is a deliberate tradeoff: the core audit-trail guarantee is
-"emit returned nil means the event is on disk." An async write
-buffer would weaken that guarantee (buffered events lost on crash),
-so none is shipped by default.
-
-Practical implications:
-
-- Tune for fast local storage. Network filesystems (NFS, EFS)
-  behave poorly under WAL mode.
-- If the log write itself fails, `step.Now` / `step.Random` panic
-  with a `non-replayable` message rather than silently continuing
-  with a broken hash chain.
-- A long-running agent on a slow disk is detectable via OTel span
-  durations — `agent.turn` latency that exceeds LLM+tool latency by
-  much is a disk-stall signal.
-
-Future work: an opt-in bounded write buffer (drops the
-write-through guarantee for throughput) is a follow-up, not a
-default.
+The log and the returned Go error are meant to agree: one is the audit
+trail, the other is the direct control-flow signal to the caller.
 
 ---
 
-## 6.3 Observability
+## 8. Dependencies
 
-Three independent layers, pick whichever subset you need:
+External dependencies are scoped by subsystem, not centralized into one
+"engine" package.
 
-1. **Event log** — the source of truth. Every emission lands as a
-   typed `event.Event` with `(RunID, Seq, PrevHash, Timestamp, Kind,
-   Payload)`. This is the audit trail; nothing else here can replace
-   it. Read it via `EventLog.Read(ctx, runID)` after the run, or
-   stream via `EventLog.Stream(ctx, runID)` while the run is live.
+Examples:
 
-2. **`log/slog`** — structured side-channel trace. Set
-   `Agent.Config.Logger`; every record carries `run_id`, plus
-   `turn_id` / `call_id` / `attempt` where relevant. Levels:
-   - `Debug` — turn boundaries.
-   - `Info` — `run started`, `run completed`, `run cancelled`.
-   - `Warn` — budget trips, transient tool retries.
-   - `Error` — `run failed` (terminal).
+- `fxamacker/cbor` for canonical CBOR encoding
+- `zeebo/blake3` for event hashing
+- `openai-go/v3`, `anthropic-sdk-go`, and `google.golang.org/genai`
+  for provider adapters
+- `modernc.org/sqlite` for the SQLite backend
+- `prometheus/client_golang` for metrics
+- OpenTelemetry packages for tracing
 
-   Defaults to `slog.Default()` when nil; pass an `io.Discard`-backed
-   handler to silence library output entirely.
-
-3. **OpenTelemetry** — distributed-trace integration. The library
-   uses the global `otel.Tracer` provider; without an SDK configured
-   you pay only the no-op tracer indirection. Span tree:
-
-   ```
-   agent.run
-   └── agent.turn
-       ├── agent.llm_call
-       └── agent.tool_call (one per attempt; retries add Attempt attr)
-   ```
-
-   Span errors mirror the terminal event kind. Use OTel for "what
-   takes the time?" investigations; use slog for "what happened
-   when?"; use the event log for "what *exactly* happened?"
+The root package is not stdlib-only today; some core runtime behavior
+depends on packages like ULID, BLAKE3, and OpenTelemetry.
 
 ---
 
-## 7. Error handling
-
-- All errors wrap with `%w`. Users use `errors.Is`/`errors.As`.
-- Runtime-level errors are recorded as `RunFailed` events with the error string. The error returned to the caller is the same error; the event is the audit trail.
-- Tool errors are recorded as `ToolCallFailed` events and bubble up as `ToolError`.
-- Provider errors are recorded in the chunk stream and turn into `TurnFailed` events; they bubble up as `ProviderError`.
-- `context.Canceled` is propagated cleanly: if the budget watchdog cancels, the resulting error is `ErrBudgetExceeded`; if the user cancels, it's `context.Canceled`.
-
----
-
-## 8. Dependencies (planned)
-
-Minimal third-party surface:
-
-- `github.com/fxamacker/cbor/v2` — canonical CBOR
-- `github.com/zeebo/blake3` — BLAKE3 hashing
-- `github.com/openai/openai-go` — M1 provider (OpenAI + OpenAI-compatible APIs via `WithBaseURL`)
-- `github.com/pkoukk/tiktoken-go` — local token counting for OpenAI-family budgets (M1)
-- `github.com/anthropics/anthropic-sdk-go` — M3 provider (deferred)
-- `golang.org/x/sync/errgroup` — parallel tool execution
-- `go.opentelemetry.io/otel` — tracing (optional, interface-only dep in core)
-
-No dependency is allowed in the root package except the stdlib. Subpackages pull in their narrow deps.
-
----
-
-## 9. Versioning
-
-- v0.x releases — API may change freely
-- v1.0 — frozen public API; event schema frozen; replay compatibility guaranteed going forward
-- Event schema version recorded in `RunStarted` event (`schema_version: 1`). Replayer refuses to replay a log with a schema version it doesn't understand.
-
----
-
-## 10. What lives where — quick reference
+## 9. Quick reference
 
 | Concern | Package | Notes |
 |---|---|---|
-| Define an Agent | `starling` (root) | `Agent`, `Config`, `Budget` |
-| Run/Resume/Replay | `starling` (root) | methods on `*Agent` |
-| Event types | `starling/event` | `Event`, payload structs, encoding |
-| Event log backends | `starling/eventlog` | `EventLog` interface + implementations |
-| LLM providers | `starling/provider/*` | OpenAI + OpenAI-compatible (via `WithBaseURL`) in M1; Anthropic, Gemini in M3 |
-| Tool interface | `starling/tool` | `Tool`, `Typed[In, Out]` helper |
-| Side-effect helpers | `starling/step` | `Now`, `Random`, `SideEffect`, `LLMCall`, `CallTool` |
-| Budget enforcement | `starling/budget` | `Budget`, token counters |
-| Replay machinery | `starling/replay` | replayer + response cache |
-| Demo agent | `examples/code-review` | shipped in M4 |
+| Agent runtime | `starling` | `Agent`, `Config`, `Budget`, commands |
+| Event schema | `starling/event` | envelope, payloads, hashing, JSON projection |
+| Event storage | `starling/eventlog` | in-memory, SQLite, Postgres, validation |
+| Providers | `starling/provider/*` | OpenAI, Anthropic, Gemini, OpenRouter |
+| Tools | `starling/tool` | interface + `tool.Typed` |
+| Deterministic runtime ops | `starling/step` | LLM/tool/time/random helpers |
+| Replay plumbing | `starling/replay` | verify + side-by-side replay stream |
+| Inspector UI | `starling/inspect` | reusable handler and embedded UI |
+| Example app | `examples/m1_hello` | canonical dual-mode binary |
+| Inspector demo | `examples/m4_inspector_demo` | local UI/demo data |

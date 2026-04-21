@@ -30,7 +30,7 @@ page does not re-list every field.
 | `starling/tool/builtin`            | Small demo tool set (`Fetch`, `ReadFile`)                        |
 | `starling/step`                    | Determinism-enforcing primitives: `LLMCall`, `CallTool`, etc.    |
 | `starling/replay`                  | Replay-factory plumbing and side-by-side stream                  |
-| `starling/inspect`                 | Read-only HTTP inspector (`http.Handler`)                        |
+| `starling/inspect`                 | Local HTTP inspector (`http.Handler`)                            |
 
 ---
 
@@ -173,9 +173,12 @@ type EventLog interface {
 - `Append` MUST reject any event whose `Seq`/`PrevHash` does not
   extend the existing chain for `runID`. This is what makes
   `ErrRunInUse` and `ErrLogCorrupt` meaningful.
-- `Stream` MUST deliver events in chain order and MUST close the
-  channel when the run reaches a terminal kind or `ctx` is cancelled.
-  Slow-subscriber drops are permitted, but the close must be clean.
+- `Stream` is a history-plus-live subscription. It closes on `ctx`
+  cancellation, log close, or subscriber overflow.
+- Under concurrent appends, strict history-then-live ordering is not
+  guaranteed on every backend; consumers that need monotonic handling
+  must track the highest `Seq` seen and discard anything at or below
+  it.
 - `Read` returns the full chain as of the call; it is NOT required to
   include events appended after the read starts.
 
@@ -203,10 +206,11 @@ type RunLister interface {
 ```
 
 Deliberately **not** part of `EventLog` — write-only/forwarding
-backends shouldn't be forced to enumerate. Both shipped backends
-satisfy it; callers type-assert when they need it. `RunSummary`
-carries `RunID`, `StartedAt`, `LastSeq`, `TerminalKind` (zero when the
-run is still in progress), sorted newest-first.
+backends shouldn't be forced to enumerate. SQLite, Postgres, and the
+in-memory backend satisfy it today; callers type-assert when they need
+it. `RunSummary` carries `RunID`, `StartedAt`, `LastSeq`,
+`TerminalKind` (zero when the run is still in progress), sorted
+newest-first.
 
 `ErrReadOnly` is the sentinel returned by any read-only handle on
 `Append`.

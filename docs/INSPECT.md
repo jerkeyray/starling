@@ -63,6 +63,7 @@ the URL is logged on startup, and your browser opens automatically.
 | `<db>` (positional) | — | **Required.** Path to a Starling SQLite log. |
 | `--addr=host:port` | `127.0.0.1:0` | Bind address. `:0` picks a free port. Wildcard hosts (`0.0.0.0`, `::`, `[::]`, empty) are normalized to `localhost` in the printed URL because no browser can open `[::]:43127`. |
 | `--no-open` | `false` | Skip the browser launch. Use this over SSH or in a headless environment. |
+| `--token=<value>` | empty | Require `Authorization: Bearer <value>` on every request. Precedence is `InspectCmd.Token`, then `--token`, then `STARLING_INSPECT_TOKEN`. |
 
 ```sh
 # Headless / SSH
@@ -114,7 +115,7 @@ The pretty-printed JSON payload is `event.ToJSON(ev)` indented with
 two spaces. Byte-slice fields (hashes, raw provider responses,
 CBOR-encoded tool args) currently render as base64 strings — that's
 how Go's `encoding/json` handles `[]byte`. Decoding inner CBOR for
-known shapes is on the post-M4 list.
+known shapes is deferred follow-up work.
 
 ## Security model
 
@@ -227,7 +228,7 @@ go run ./examples/m1_hello inspect ./runs.db
 
 | | Why |
 |---|---|
-| Postgres live tail | InMemory and SQLite are the documented-shipped backends. PG inherits the endpoint unchanged (it already implements `Stream`) once the backend is formally announced. |
+| Postgres live tail | The SSE endpoint is SQLite-first in the docs because `starling-inspect` opens SQLite files directly. The reusable `inspect.Server` works with any `eventlog.EventLog` + `RunLister`, including Postgres-backed deployments wired by the caller. |
 | Authentication / TLS | Localhost developer tool by design. Use a reverse proxy. |
 | Hash-chain visualization | The validation badge + one-line reason covers the operator workflow. Full visualization if demand surfaces. |
 | Static export (`starling-inspect export ./out/`) | Cool for postmortems, deferred. |
