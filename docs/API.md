@@ -24,6 +24,7 @@ page does not re-list every field.
 | `starling/provider`                | `Provider` interface, streaming types, aggregated `Response`     |
 | `starling/provider/openai`         | OpenAI Chat Completions + every OpenAI-compatible endpoint       |
 | `starling/provider/anthropic`      | Anthropic Messages adapter                                       |
+| `starling/provider/gemini`         | Google Gemini adapter (Gemini API backend; Vertex AI deferred)   |
 | `starling/tool`                    | `Tool` interface, `Typed[In,Out]` reflective helper              |
 | `starling/tool/builtin`            | Small demo tool set (`Fetch`, `ReadFile`)                        |
 | `starling/step`                    | Determinism-enforcing primitives: `LLMCall`, `CallTool`, etc.    |
@@ -264,6 +265,15 @@ downstream `ToolCall`s for correlation.
 - `provider/anthropic` — Anthropic Messages API. Options: `WithAPIKey`,
   `WithBaseURL`, `WithHTTPClient`, `WithProviderID`, `WithAPIVersion`
   (default `2023-06-01`).
+- `provider/gemini` — Google Gemini API (`generativelanguage.googleapis.com`).
+  Options: `WithAPIKey`, `WithBaseURL`, `WithHTTPClient`, `WithProviderID`,
+  `WithAPIVersion` (default `v1beta`). Gemini's role model is
+  `user`/`model` only; system prompts flow through `Request.SystemPrompt`
+  into the dedicated `systemInstruction` field, and tool results are
+  delivered as user-role turns carrying a `functionResponse` part.
+  Usage arrives only on the terminal stream chunk. Only the Gemini API
+  backend is wired today; Vertex AI (OAuth / ADC auth) is a deferred
+  follow-up.
 
 ---
 
