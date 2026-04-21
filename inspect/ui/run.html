@@ -6,8 +6,9 @@
   <div>
     <h1>Run <span class="runid-mono">{{.RunID}}</span></h1>
     <p class="run-meta">
-      <span id="event-count">{{len .Rows}}</span> events
-      <span id="live-status" class="live-pill" hidden>● live</span>
+      <span><span id="event-count">{{len .Rows}}</span> events</span>
+      <span id="live-status" class="live-pill" hidden>live</span>
+      <button id="reconnect" class="reconnect" type="button" hidden>reconnect</button>
     </p>
   </div>
   <div class="run-head-right">
@@ -24,9 +25,24 @@
 </header>
 
 <section class="run-pane">
-  <ol class="timeline" id="timeline">
-    {{range .Rows}}{{template "event_row.html" .}}{{end}}
-  </ol>
+  <div>
+    <div class="timeline-head">
+      <input id="timeline-filter"
+             type="search"
+             placeholder="filter events (kind, call id, text)…"
+             autocomplete="off"
+             aria-label="filter timeline">
+      <span class="visible-count" id="timeline-visible"></span>
+    </div>
+    <ol class="timeline" id="timeline">
+      {{range .Rows}}{{template "event_row.html" .}}{{end}}
+    </ol>
+    <div class="hint-row">
+      <span><span class="kbd">j</span> / <span class="kbd">k</span> navigate</span>
+      <span><span class="kbd">/</span> focus filter</span>
+      <span><span class="kbd">Esc</span> clear</span>
+    </div>
+  </div>
 
   <aside id="detail" class="detail">
     {{template "event_detail.html" .Initial}}

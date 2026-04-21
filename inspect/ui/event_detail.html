@@ -3,13 +3,19 @@
   <div class="detail-title">
     <span class="ev-seq">{{.SeqLabel}}</span>
     <span class="ev-kind ev-{{.Family}}">{{.Kind}}</span>
-    <time class="ev-time" datetime="{{.TimeISO}}">{{.Time}}</time>
+    <time class="ev-time" datetime="{{.TimeISO}}" title="{{.TimeISO}}">{{.Time}}</time>
   </div>
   <dl class="detail-hashes">
     <dt>hash</dt>
-    <dd title="{{.HashHex}}"><code>{{.HashShort}}</code></dd>
+    <dd>
+      <code title="{{.HashHex}}">{{.HashShort}}</code>
+      {{if .HashHex}}<button type="button" class="copy-btn" data-copy="{{.HashHex}}" aria-label="copy hash">copy</button>{{end}}
+    </dd>
     <dt>prev</dt>
-    <dd title="{{.PrevHashHex}}"><code>{{.PrevHashShort}}</code></dd>
+    <dd>
+      <code title="{{.PrevHashHex}}">{{.PrevHashShort}}</code>
+      {{if .PrevHashHex}}<button type="button" class="copy-btn" data-copy="{{.PrevHashHex}}" aria-label="copy prev hash">copy</button>{{end}}
+    </dd>
     {{if .CallID}}
     <dt>call</dt>
     <dd>
@@ -19,6 +25,7 @@
          hx-on:click="event.preventDefault();window.starlingJumpToCall(this.dataset.callid,{{.Seq}})">
         <code>{{.CallID}}</code>
       </a>
+      <button type="button" class="copy-btn" data-copy="{{.CallID}}" aria-label="copy call id">copy</button>
     </dd>
     {{end}}
   </dl>

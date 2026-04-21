@@ -42,13 +42,14 @@
   </tbody>
 </table>
 {{else}}
-<p class="empty">
+<div class="empty">
   {{if .Status}}
-    No runs with status <code>{{.Status}}</code>.
-    <a href="/">Show all.</a>
+    <p class="empty-title">No runs with status <code>{{.Status}}</code>.</p>
+    <p><a href="/">Show all runs</a></p>
   {{else}}
-    No runs in this log yet.
+    <p class="empty-title">No runs recorded yet.</p>
+    <p>Point an agent at this event log and refresh to see runs appear here.</p>
   {{end}}
-</p>
+</div>
 {{end}}
 {{end}}
