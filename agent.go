@@ -26,54 +26,38 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Agent is the user-facing entry point. Construction is a plain
-// struct-literal — every field is validated on Run, not at build time,
-// so tests can poke at Agent{} freely.
+// Agent is the user-facing entry point. Fields are validated on Run,
+// not at construction.
 type Agent struct {
 	// Provider is the LLM adapter. Required.
 	Provider provider.Provider
 
-	// Tools are the tools the agent may plan. Optional; an agent with
-	// no tools can still have conversations.
+	// Tools the agent may plan. Optional.
 	Tools []tool.Tool
 
 	// Log is the event log backend. Required.
 	Log eventlog.EventLog
 
-	// Budget is the budget enforcement struct. Optional; zero values
-	// disable that axis. All four axes (MaxInputTokens, MaxOutputTokens,
-	// MaxUSD, MaxWallClock) are enforced: input tokens pre-call,
-	// output tokens and USD mid-stream on every usage chunk, wall clock
-	// via context.WithDeadline on the run.
+	// Budget enforces token/USD/wall-clock caps. Optional; zero
+	// values disable individual axes. Input tokens are checked
+	// pre-call, output tokens and USD mid-stream, wall-clock via
+	// context deadline.
 	Budget *Budget
 
 	// Config carries model / system prompt / params / MaxTurns.
 	Config Config
 
-	// Namespace is an optional prefix for this agent's RunIDs, letting
-	// multiple tenants share one event log without colliding if they
-	// pick the same raw RunID. When non-empty, every event written by
-	// this agent carries RunID = Namespace + "/" + <ULID>, and all
-	// eventlog lookups (Read, Stream, Replay) must use the same prefixed
-	// form. Empty namespace preserves pre-M3 behavior exactly.
-	//
-	// Must not contain "/" (the reserved separator); validate() rejects
-	// this at Run time.
+	// Namespace prefixes this agent's RunIDs so multiple tenants can
+	// share one event log. When set, RunID = Namespace + "/" + ULID;
+	// must not contain "/". Empty preserves pre-M3 behavior.
 	Namespace string
 
-	// Metrics is an optional Prometheus metrics sink. When non-nil,
-	// every run emits counters/histograms covering lifecycle, provider
-	// calls, tool calls, eventlog appends, and budget trips. See
-	// NewMetrics / MetricsHandler. Nil (the default) disables the
-	// entire metrics pipeline — record calls become no-ops at the
-	// lowest level and there is no runtime cost.
+	// Metrics is an optional Prometheus sink. Nil disables the
+	// pipeline at no runtime cost.
 	Metrics *Metrics
 
-	// replayRecorded, when non-nil, switches Run into replay mode:
-	// step.Context operates under ModeReplay, the RunID is pulled from
-	// the first recorded event rather than freshly minted, and every
-	// emit() compares against the recorded event at the matching seq.
-	// Set exclusively by replay.Verify; not part of the public API.
+	// replayRecorded switches Run into replay mode (set by
+	// replay.Verify). Not part of the public API.
 	replayRecorded []event.Event
 }
 
@@ -91,14 +75,9 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	return a.runWithID(ctx, a.mintRunID(), goal)
 }
 
-// mintRunID returns the RunID to use for this Run / Stream invocation.
-// In replay mode it reads the RunID verbatim from the first recorded
-// event (which already carries whatever namespace prefix the original
-// run wrote); in live mode it mints a fresh ULID and applies the
-// configured Namespace prefix.
-//
-// Caller must have already passed validate(); this helper does not
-// re-check preconditions.
+// mintRunID returns the RunID for this invocation: the recorded ID
+// in replay mode, or a fresh ULID (namespaced) in live mode.
+// Preconditions: caller has passed validate().
 func (a *Agent) mintRunID() string {
 	if len(a.replayRecorded) > 0 {
 		return a.replayRecorded[0].RunID
@@ -110,25 +89,17 @@ func (a *Agent) mintRunID() string {
 	return id
 }
 
-// runWithID is Run's body with a pre-assigned runID. Exposed internally
-// so Stream can subscribe to log events under a known runID before the
-// run goroutine emits RunStarted. Run is a thin wrapper that validates
-// and calls mintRunID.
+// runWithID is Run's body with a pre-assigned runID. Exposed so
+// Stream can subscribe before RunStarted is emitted.
 func (a *Agent) runWithID(ctx context.Context, runID string, goal string) (*RunResult, error) {
 	startWall := time.Now()
 
-	// Metrics: bump the started/in-flight counters as early as possible
-	// and decrement in-flight on every exit. Terminal-status and
-	// duration histograms are observed inside runLoop once we know
-	// how the run ended.
 	a.Metrics.onRunStarted()
 	defer a.Metrics.onRunFinished()
 
-	// Wall-clock budget: wrap the run's ctx with a deadline so blocking
-	// provider/tool calls unblock on expiry. DeadlineExceeded surfaces
-	// through LLMCall / CallTool unchanged; emitTerminal inspects
-	// a.Budget.MaxWallClock to decide between RunCancelled (external
-	// cancellation) and RunFailed{ErrorType:"budget"} (wall-clock trip).
+	// Wall-clock budget: wrap ctx with a deadline so blocking calls
+	// unblock on expiry. emitTerminal distinguishes budget trip from
+	// external cancellation.
 	if a.Budget != nil && a.Budget.MaxWallClock > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, startWall.Add(a.Budget.MaxWallClock))
@@ -137,8 +108,6 @@ func (a *Agent) runWithID(ctx context.Context, runID string, goal string) (*RunR
 
 	logger := obs.Resolve(a.Config.Logger).With(obs.AttrRunID, runID)
 
-	// Open the root OTel span. The no-op tracer is zero cost when no
-	// SDK is wired up, so unconditional wrapping is safe.
 	ctx, runSpan := obs.StartRunSpan(ctx, runID)
 	defer runSpan.End()
 

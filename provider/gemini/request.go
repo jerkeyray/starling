@@ -11,12 +11,9 @@ import (
 )
 
 // buildParams converts a provider.Request into the (contents, config)
-// pair the genai SDK expects. Model / Messages / SystemPrompt are
-// always applied; promoted first-class fields (ToolChoice,
-// StopSequences, TopK, MaxOutputTokens) are set when non-zero.
-// Vendor-only knobs are not threaded through Params today — Gemini's
-// knobs (temperature, topP, seed, responseMimeType, thinkingBudget)
-// can be promoted in a follow-up once callers actually need them.
+// pair the genai SDK expects. Params (vendor-only knobs) is not
+// threaded yet; promote individual knobs (temperature, topP, etc.)
+// when callers need them.
 func buildParams(req *provider.Request) ([]*genai.Content, *genai.GenerateContentConfig, error) {
 	cfg := &genai.GenerateContentConfig{}
 
@@ -61,10 +58,9 @@ func buildParams(req *provider.Request) ([]*genai.Content, *genai.GenerateConten
 	return contents, cfg, nil
 }
 
-// convertToolChoice maps the portable ToolChoice string to Gemini's
-// FunctionCallingConfig. A specific tool name routes to MODE_ANY with
-// AllowedFunctionNames restricted to that one function. OpenAI's
-// "required" is translated to "any" for cross-provider ergonomics.
+// convertToolChoice maps the portable ToolChoice to Gemini's
+// FunctionCallingConfig. A tool name routes to MODE_ANY with
+// AllowedFunctionNames set to that one function.
 func convertToolChoice(tc string) *genai.FunctionCallingConfig {
 	switch tc {
 	case "auto":
@@ -81,30 +77,18 @@ func convertToolChoice(tc string) *genai.FunctionCallingConfig {
 	}
 }
 
-// convertMessages translates conversational turns into Gemini's
-// Content / Part shape.
-//
-// Gemini has only two roles on the wire — "user" and "model" — and no
-// dedicated "tool" role. Tool results are delivered as user-role
-// messages carrying a functionResponse part. The translator walks the
-// messages twice-folded: RoleAssistant with ToolUses emits a model
-// turn with text + functionCall parts; RoleTool folds into a user
-// turn with a single functionResponse part. Looking up the original
-// tool name from prior assistant turns is required because Gemini's
-// functionResponse requires both name and id to match.
+// convertMessages translates turns into Gemini's Content/Part shape.
+// Gemini has only "user" and "model" roles; tool results are
+// delivered as user turns carrying a functionResponse part. We walk
+// forward tracking CallID→Name so RoleTool messages can look up the
+// name Gemini requires on functionResponse.
 func convertMessages(in []provider.Message) ([]*genai.Content, error) {
 	out := make([]*genai.Content, 0, len(in))
-
-	// Map of CallID → Name, populated as we walk forward so a later
-	// RoleTool message can resolve its tool name.
 	callNames := map[string]string{}
 
 	for _, m := range in {
 		switch m.Role {
 		case provider.RoleSystem:
-			// Anthropic errors on this; Gemini's doc-layer contract is
-			// the same (SystemPrompt is the canonical field). Surface
-			// the mistake rather than silently drop.
 			return nil, errors.New("gemini: system messages must be passed via Request.SystemPrompt")
 
 		case provider.RoleUser:
@@ -130,9 +114,7 @@ func convertMessages(in []provider.Message) ([]*genai.Content, error) {
 				callNames[tu.CallID] = tu.Name
 			}
 			if len(parts) == 0 {
-				// Keep the turn addressable even if the model produced
-				// no text and no tool calls (shouldn't happen, but be
-				// lenient).
+				// Keep the turn addressable even if empty.
 				parts = append(parts, &genai.Part{Text: ""})
 			}
 			out = append(out, &genai.Content{Role: genai.RoleModel, Parts: parts})
@@ -141,9 +123,6 @@ func convertMessages(in []provider.Message) ([]*genai.Content, error) {
 			if m.ToolResult == nil {
 				return nil, errors.New("gemini: RoleTool message missing ToolResult")
 			}
-			// Name must match the prior functionCall; synthesize from
-			// callNames lookup. If unresolvable, leave empty and let
-			// the API return a clear 400 rather than silently succeed.
 			name := callNames[m.ToolResult.CallID]
 			resp := map[string]any{"result": m.ToolResult.Content}
 			if m.ToolResult.IsError {
@@ -167,9 +146,8 @@ func convertMessages(in []provider.Message) ([]*genai.Content, error) {
 	return out, nil
 }
 
-// decodeToolArgs converts the model's JSON args back into a
-// map[string]any suitable for genai.FunctionCall.Args. Empty args map
-// to {} to match the OpenAI and Anthropic adapters.
+// decodeToolArgs converts JSON args to map[string]any for
+// genai.FunctionCall.Args. Empty args → {}.
 func decodeToolArgs(raw json.RawMessage) (map[string]any, error) {
 	if len(raw) == 0 {
 		return map[string]any{}, nil
@@ -184,10 +162,8 @@ func decodeToolArgs(raw json.RawMessage) (map[string]any, error) {
 	return v, nil
 }
 
-// convertTool maps a provider.ToolDefinition into a Gemini
-// FunctionDeclaration. The JSON Schema provided by the caller is
-// unmarshaled into the SDK's typed Schema; malformed schemas fail
-// here rather than on the wire.
+// convertTool maps a ToolDefinition into a Gemini
+// FunctionDeclaration. Malformed schemas fail here, not on the wire.
 func convertTool(t provider.ToolDefinition) (*genai.FunctionDeclaration, error) {
 	decl := &genai.FunctionDeclaration{
 		Name:        t.Name,

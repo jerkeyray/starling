@@ -1,21 +1,7 @@
-// Package openrouter adapts the OpenRouter API to Starling's Provider
-// interface. OpenRouter speaks the OpenAI Chat Completions wire format,
-// so this package is a thin wrapper over provider/openai that sets the
-// base URL, the default provider ID, and optional attribution headers
-// (HTTP-Referer, X-Title) that OpenRouter uses to credit traffic on its
-// leaderboard.
-//
-// Usage:
-//
-//	p, err := openrouter.New(
-//	    openrouter.WithAPIKey(os.Getenv("OPENROUTER_API_KEY")),
-//	    openrouter.WithHTTPReferer("https://myapp.example"),
-//	    openrouter.WithXTitle("my-app"),
-//	)
-//
-// The constructor returns a standard provider.Provider — streaming,
-// tool calls, usage accounting, and the RawResponseHash chain are all
-// inherited from the OpenAI adapter unchanged.
+// Package openrouter is a thin wrapper over provider/openai that
+// sets OpenRouter's base URL and optional attribution headers
+// (HTTP-Referer, X-Title). Streaming, tool calls, and usage
+// accounting are inherited unchanged.
 package openrouter
 
 import (
@@ -25,12 +11,10 @@ import (
 	"github.com/jerkeyray/starling/provider/openai"
 )
 
-// DefaultBaseURL is the public OpenRouter endpoint. Override with
-// WithBaseURL for tests or when routing through a compatible proxy.
+// DefaultBaseURL is the public OpenRouter endpoint.
 const DefaultBaseURL = "https://openrouter.ai/api/v1"
 
-// New constructs a Provider that talks to OpenRouter. It forwards to
-// openai.New with OpenRouter-appropriate defaults.
+// New constructs a Provider that talks to OpenRouter.
 func New(opts ...Option) (provider.Provider, error) {
 	cfg := config{
 		baseURL:    DefaultBaseURL,
@@ -40,10 +24,8 @@ func New(opts ...Option) (provider.Provider, error) {
 		opt(&cfg)
 	}
 
-	// If attribution headers are requested, layer a RoundTripper that
-	// injects them over whatever *http.Client the caller supplied (or
-	// a fresh default client otherwise). The inner transport is
-	// preserved so custom transports / proxies still work.
+	// Layer a RoundTripper that injects attribution headers on top of
+	// the caller's client (or a fresh one). Inner transport preserved.
 	httpClient := cfg.httpClient
 	if cfg.httpReferer != "" || cfg.xTitle != "" {
 		base := httpClient
@@ -85,36 +67,31 @@ type config struct {
 	providerID  string
 }
 
-// WithAPIKey sets the OpenRouter API key used for authentication.
+// WithAPIKey sets the OpenRouter API key.
 func WithAPIKey(key string) Option { return func(c *config) { c.apiKey = key } }
 
-// WithBaseURL overrides the API base URL. Defaults to DefaultBaseURL;
-// override for tests (httptest server) or for proxies that front
-// OpenRouter.
+// WithBaseURL overrides the API base URL. Defaults to DefaultBaseURL.
 func WithBaseURL(url string) Option { return func(c *config) { c.baseURL = url } }
 
-// WithHTTPReferer sets the HTTP-Referer header OpenRouter uses for
-// traffic attribution on its public leaderboard. Optional.
+// WithHTTPReferer sets the HTTP-Referer header for OpenRouter
+// attribution. Optional.
 func WithHTTPReferer(url string) Option { return func(c *config) { c.httpReferer = url } }
 
-// WithXTitle sets the X-Title header OpenRouter uses for traffic
-// attribution on its public leaderboard. Optional.
+// WithXTitle sets the X-Title header for OpenRouter attribution.
+// Optional.
 func WithXTitle(name string) Option { return func(c *config) { c.xTitle = name } }
 
-// WithHTTPClient supplies a custom *http.Client. If attribution
-// headers are also configured, they are layered on top of the caller's
-// transport.
+// WithHTTPClient supplies a custom *http.Client. Attribution headers,
+// if set, are layered on top of the caller's transport.
 func WithHTTPClient(c *http.Client) Option {
 	return func(cfg *config) { cfg.httpClient = c }
 }
 
-// WithProviderID overrides the Info().ID string. Defaults to
-// "openrouter".
+// WithProviderID overrides Info().ID. Defaults to "openrouter".
 func WithProviderID(id string) Option { return func(c *config) { c.providerID = id } }
 
-// headerRoundTripper injects OpenRouter attribution headers on every
-// outgoing request. Request is cloned so callers' Request objects are
-// not mutated.
+// headerRoundTripper injects attribution headers. Clones the request
+// so the caller's Request is not mutated.
 type headerRoundTripper struct {
 	referer string
 	title   string

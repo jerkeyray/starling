@@ -29,48 +29,31 @@ func defaultResumeConfig() resumeConfig {
 	return resumeConfig{reissueTools: true}
 }
 
-// WithReissueTools controls whether Resume re-runs tool calls that were
-// scheduled but never completed before the process died. Defaults to
-// true — matching the common case ("a fetch died mid-flight, retry
-// it"). Set to false for agents whose tools mutate external state and
-// whose authors prefer a hard error (ErrPartialToolCall) over a silent
-// retry.
-//
-// Re-issued calls are emitted with fresh CallIDs. The chain records
-// what actually ran, not what was originally attempted; the
-// RunResumed.PendingCalls field carries the count of orphans for
-// inspector UX.
+// WithReissueTools controls whether Resume re-runs tool calls that
+// were scheduled but never completed. Defaults to true. Set false
+// for tools that mutate external state and should fail loudly
+// (ErrPartialToolCall) instead of silently retrying. Re-issued
+// calls get fresh CallIDs.
 func WithReissueTools(b bool) ResumeOption {
 	return func(c *resumeConfig) { c.reissueTools = b }
 }
 
 // Resume continues a previously-started run from its last recorded
-// event. Events are loaded from a.Log, conversation state is
-// reconstructed, and the agent loop re-enters with that state.
+// event. If extraMessage is non-empty it is appended as a user turn
+// before the loop resumes. A terminal event is always emitted before
+// return.
 //
-// If extraMessage is non-empty it is appended as a user turn (and
-// recorded as a UserMessageAppended event) before the loop resumes;
-// passing "" continues the run as if the process had never died.
+// Returns:
+//   - ErrRunNotFound: runID not in a.Log.
+//   - ErrRunAlreadyTerminal: last event is terminal.
+//   - ErrSchemaVersionMismatch: RunStarted schema unknown.
+//   - ErrPartialToolCall: unpaired ToolCallScheduled with
+//     WithReissueTools(false).
+//   - ErrRunInUse: chain advanced between tail read and first append.
 //
-// Resume returns:
-//   - ErrRunNotFound when runID has no events in a.Log.
-//   - ErrRunAlreadyTerminal when the run's last event is terminal.
-//   - ErrSchemaVersionMismatch when RunStarted was written under a
-//     schema this binary does not understand.
-//   - ErrPartialToolCall when the run has unpaired ToolCallScheduled
-//     events and WithReissueTools(false) was passed.
-//   - ErrRunInUse when another writer has advanced the chain between
-//     the tail read and the first append.
-//
-// Run() documentation on terminal-event emission applies here too:
-// Resume always emits a terminal event before returning, so the log
-// remains self-describing regardless of how the resumed portion ends.
-//
-// Budget semantics: Budget.MaxWallClock resets (it's per-process),
-// and MaxTurns counts total turns across the whole run. Token and
-// USD step-level enforcement also resets at the process boundary;
-// the returned RunResult.Stats is still cumulative. See
-// docs/RESUME.md for the full rundown.
+// Budget: MaxWallClock and step-level token/USD caps reset at the
+// process boundary; MaxTurns counts across the whole run. See
+// docs/RESUME.md.
 func (a *Agent) Resume(ctx context.Context, runID, extraMessage string) (*RunResult, error) {
 	return a.ResumeWith(ctx, runID, extraMessage)
 }

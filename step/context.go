@@ -30,27 +30,20 @@ type Context struct {
 	tools    *Registry
 	budget   BudgetConfig
 
-	// mode, recorded, and replayIdx drive the non-determinism helpers
-	// (step.Now / step.Random / step.SideEffect). Under ModeReplay the
-	// helpers scan recorded[replayIdx:] for the next SideEffectRecorded
-	// instead of running their effect.
+	// Replay mode: helpers (Now/Random/SideEffect) scan
+	// recorded[replayIdx:] instead of running their effect.
 	mode      Mode
 	recorded  []event.Event
 	replayIdx int
 	clockFn   func() time.Time
 
-	// maxParallelTools caps concurrent tool execution for CallTools.
-	// 0 means use DefaultMaxParallelTools.
+	// Caps concurrent tool execution; 0 → DefaultMaxParallelTools.
 	maxParallelTools int
 
-	// logger is the slog.Logger shared across the run, with run_id
-	// already bound. Never nil — NewContext substitutes a discard
-	// logger when cfg.Logger is nil so call sites can assume a logger.
+	// Never nil — NewContext substitutes a discard logger.
 	logger *slog.Logger
 
-	// metrics records observability samples for provider / tool /
-	// eventlog calls. May be nil; every emit site must tolerate a
-	// nil sink by short-circuiting.
+	// May be nil; emit sites must tolerate a nil sink.
 	metrics MetricsSink
 
 	mu       sync.Mutex
@@ -58,18 +51,14 @@ type Context struct {
 	prevHash []byte
 }
 
-// ErrInvalidConfig is returned by NewContext when cfg is missing a
-// required field (Log, RunID) or has an invalid field combination
-// (ModeReplay without Recorded). Callers that treat a bad config as a
-// programmer bug can panic on it explicitly; the function itself does
-// not.
+// ErrInvalidConfig is returned by NewContext when cfg lacks a
+// required field (Log, RunID) or combines ModeReplay without
+// Recorded.
 var ErrInvalidConfig = fmt.Errorf("step: invalid Config")
 
-// NewContext returns a Context primed to emit the first event of a run
-// (seq=1, prevHash=nil). cfg.Log and cfg.RunID are required; Provider
-// and Tools are optional at construction and only checked lazily by
-// LLMCall and CallTool respectively. Returns an error wrapping
-// ErrInvalidConfig if cfg is malformed.
+// NewContext returns a Context primed to emit the first event
+// (seq=1, prevHash=nil). Log and RunID are required; Provider and
+// Tools are checked lazily by LLMCall and CallTool.
 func NewContext(cfg Config) (*Context, error) {
 	if cfg.Log == nil {
 		return nil, fmt.Errorf("%w: cfg.Log is nil", ErrInvalidConfig)
@@ -148,18 +137,11 @@ func (c *Context) registry() *Registry { return c.tools }
 // budgetCfg returns the pre-call budget configuration.
 func (c *Context) budgetCfg() BudgetConfig { return c.budget }
 
-// emit builds the full Event envelope for payload, advances the chain
-// cursor, and appends to the log. Safe for concurrent use.
-//
-// kind must match the payload struct type; callers pass both so the
-// encoder stays generic without reflection.
-//
-// Under ModeReplay, emit compares the would-be event against the
-// recorded event at the same seq: Kind + Payload must match, and the
-// recorded Timestamp is reused so the chain hash sequence is
-// byte-identical to the original run. A mismatch returns an error
-// wrapping ErrReplayMismatch; the verifier (replay.Verify) translates
-// that into starling.ErrNonDeterminism.
+// emit builds the Event envelope, advances the chain cursor, and
+// appends to the log. Safe for concurrent use. Under ModeReplay,
+// compares against recorded[seq]: Kind+Payload must match, and the
+// recorded Timestamp is reused for byte-identical chain hashes. A
+// mismatch returns ErrReplayMismatch.
 func emit[T any](ctx context.Context, c *Context, kind event.Kind, payload T) error {
 	encoded, err := event.EncodePayload(payload)
 	if err != nil {

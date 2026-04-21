@@ -1,17 +1,6 @@
-// Stream — channel-based live run API.
-//
-// Stream starts a new agent run and yields one StepEvent per emitted
-// event on the returned channel. Terminal events (RunCompleted,
-// RunFailed, RunCancelled) are always delivered as the final item
-// before the channel closes. A consumer wanting per-event reactions
-// (dashboards, real-time supervisors, SSE fan-out inside a larger
-// server) can wire it up in one call rather than subscribing to
-// eventlog.Stream and re-implementing projection.
-//
-// The shape mirrors replay.Stream: subscribe to the log BEFORE kicking
-// off the run so no event can land ahead of the reader; forward events
-// through a small-buffered channel; close on terminal, ctx cancel, or
-// log close.
+// Channel-based live run API. Mirrors replay.Stream: subscribe to
+// the log before starting the run so nothing lands ahead of the
+// reader; close on terminal, ctx cancel, or log close.
 
 package starling
 
@@ -23,39 +12,22 @@ import (
 	"github.com/jerkeyray/starling/event"
 )
 
-// streamBufferSize is the capacity of the StepEvent channel returned
-// by Stream. Slow consumers risk being dropped by the underlying
-// eventlog subscriber (in-memory drops on overflow; the 256-slot log
-// buffer backs this 64-slot projector, which is generous for any
-// hand-written tool set). Consumers should drain promptly.
+// Capacity of the StepEvent channel. Slow consumers risk being
+// dropped by the underlying eventlog subscriber.
 const streamBufferSize = 64
 
-// Stream starts a new agent run and returns a channel delivering one
-// StepEvent per emitted event. Terminal events are always the last
-// item on the channel before it closes.
-//
-// The channel has a small buffer; slow consumers risk losing events
-// if the eventlog's subscriber buffer overflows (see
-// eventlog.EventLog.Stream documentation). The channel still closes
-// cleanly in that case, so the contract "channel always closes" holds
-// regardless of consumer speed.
-//
-// On ctx cancel the agent run is cancelled (standard ctx plumbing)
-// and the channel closes after draining any in-flight events.
-//
-// Setup errors (validate failure, subscribe failure) are returned
-// synchronously and the returned channel is nil. Run-time errors
-// surface as a terminal StepEvent (Kind=RunFailed / RunCancelled,
-// Err populated) and then the channel closes — Stream itself does
-// not return a second error.
+// Stream starts a new run and returns a channel of StepEvents.
+// Terminal events are always last. Setup errors are returned
+// synchronously; run-time errors surface as a terminal StepEvent
+// (Err populated). On ctx cancel the run is cancelled and the
+// channel closes after draining.
 func (a *Agent) Stream(ctx context.Context, goal string) (string, <-chan StepEvent, error) {
 	if err := a.validate(); err != nil {
 		return "", nil, err
 	}
 	runID := a.mintRunID()
 
-	// Subscribe BEFORE starting the run so no event can land before
-	// our reader is up. Same pattern as replay/stream.go.
+	// Subscribe before starting the run.
 	raw, err := a.Log.Stream(ctx, runID)
 	if err != nil {
 		return "", nil, fmt.Errorf("starling: Stream subscribe: %w", err)
@@ -75,9 +47,7 @@ func (a *Agent) Stream(ctx context.Context, goal string) (string, <-chan StepEve
 			select {
 			case ev, ok := <-raw:
 				if !ok {
-					// log.Stream closed (log closed / ctx cancel / slow
-					// subscriber drop). Drain the run error slot and
-					// exit.
+					// log.Stream closed. Drain the run error slot.
 					select {
 					case <-runErrCh:
 					default:
@@ -90,12 +60,8 @@ func (a *Agent) Stream(ctx context.Context, goal string) (string, <-chan StepEve
 				case <-ctx.Done():
 					return
 				}
-				// Terminal events are always the last event a run
-				// emits (agent.Run contract). Close the stream as
-				// soon as we forward one — log.Stream itself does
-				// not close the subscriber channel at end-of-run, so
-				// without this check the channel would hang until
-				// ctx cancel.
+				// Close on terminal; log.Stream won't close the
+				// subscriber at end-of-run.
 				if ev.Kind.IsTerminal() {
 					select {
 					case <-runErrCh:

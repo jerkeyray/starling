@@ -97,27 +97,21 @@ func (s *Server) ReplayEnabled() bool { return s.replayer != nil }
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleRuns)
-	// Single prefix for everything under /run/. The dispatcher peels
-	// off the path and decides between the full-page detail view, the
-	// HTMX-swappable event-detail fragment, and (when a Replayer is
-	// wired) the replay-session endpoints.
 	s.mux.HandleFunc("/run/", s.dispatchRun)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
 }
 
-// dispatchRun routes within the /run/ prefix:
+// dispatchRun routes within /run/. runID may contain "/"
+// (Namespace + "/" + ULID) so we peel known suffixes from the right.
+// Replay routes 404 when no Replayer is configured.
 //
-//	GET  /run/{id}                                  → handleRun (view)
-//	GET  /run/{id}/event/{seq}                      → handleEventDetail (HTMX)
-//	GET  /run/{id}/events/stream                    → handleEventStream (SSE live-tail)
-//	GET  /run/{id}/replay                           → handleReplayPage   (T44)
-//	POST /run/{id}/replay                           → handleReplayStart  (T43)
-//	GET  /run/{id}/replay/{session}/stream          → handleReplayStream (SSE, T43)
-//	POST /run/{id}/replay/{session}/control         → handleReplayControl (T43)
-//
-// {id} may itself contain "/" (Namespace + "/" + ULID), so the
-// dispatcher peels known suffixes from the right rather than splitting
-// on the first slash. Replay routes 404 when no Replayer is configured.
+//	GET  /run/{id}                            → handleRun
+//	GET  /run/{id}/event/{seq}                → handleEventDetail (HTMX)
+//	GET  /run/{id}/events/stream              → handleEventStream (SSE)
+//	GET  /run/{id}/replay                     → handleReplayPage
+//	POST /run/{id}/replay                     → handleReplayStart
+//	GET  /run/{id}/replay/{session}/stream    → handleReplayStream
+//	POST /run/{id}/replay/{session}/control   → handleReplayControl
 func (s *Server) dispatchRun(w http.ResponseWriter, r *http.Request) {
 	// r.URL.Path is already percent-decoded by net/http; decoding again
 	// would collapse %2F into "/" and let an attacker split a runID

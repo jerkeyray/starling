@@ -7,17 +7,8 @@ import (
 	"github.com/jerkeyray/starling/eventlog"
 )
 
-// handleRuns renders the runs-list landing page. Calls
-// RunLister.ListRuns (already cached on the server struct) and turns
-// the result into per-row view models so the template stays simple.
-//
-// Supports a single optional query param:
-//
-//	?status=completed | failed | cancelled | in+progress
-//
-// for server-side filtering. Empty / unknown values return all rows.
-// Client-side text search is provided by app.js on top of the
-// rendered table.
+// handleRuns renders the runs-list landing page. Optional
+// ?status=completed|failed|cancelled|in+progress filters server-side.
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)

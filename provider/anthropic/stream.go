@@ -13,11 +13,9 @@ import (
 	"github.com/jerkeyray/starling/provider"
 )
 
-// anthropicStream adapts an *ssestream.Stream[anth.MessageStreamEventUnion]
-// to the provider.EventStream contract. It tracks per-content-block
-// state (the SDK reports block index only, not the block type, after
-// the initial content_block_start) and emits normalized StreamChunk
-// values one at a time via Next.
+// anthropicStream adapts an *ssestream.Stream to
+// provider.EventStream, tracking per-block state because the SDK
+// reports only block index after the initial content_block_start.
 type anthropicStream struct {
 	sdk      *ssestream.Stream[anth.MessageStreamEventUnion]
 	httpResp **http.Response
@@ -44,10 +42,8 @@ type anthropicStream struct {
 	closed         bool
 }
 
-// blockKind enumerates which content-block variant is currently open at
-// a given stream index. We need this because content_block_delta events
-// carry only the delta payload — they don't re-identify the block type
-// — so the state machine must remember it.
+// blockKind identifies the open content-block variant at a given
+// index (content_block_delta doesn't re-identify the type).
 type blockKind uint8
 
 const (

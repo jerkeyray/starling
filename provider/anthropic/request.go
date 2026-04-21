@@ -14,9 +14,7 @@ import (
 	"github.com/jerkeyray/starling/provider"
 )
 
-// buildParams converts a provider.Request into an anth.MessageNewParams.
-// Model / Messages / MaxTokens are always set; promoted first-class
-// fields (ToolChoice, StopSequences, TopK) are applied when non-empty.
+// buildParams converts a provider.Request into anth.MessageNewParams.
 // Vendor-only knobs ride along via Request.Params.
 func buildParams(req *provider.Request) (anth.MessageNewParams, error) {
 	maxTokens := int64(req.MaxOutputTokens)
@@ -65,9 +63,8 @@ func buildParams(req *provider.Request) (anth.MessageNewParams, error) {
 	return params, nil
 }
 
-// convertToolChoice maps the portable ToolChoice string to Anthropic's
-// discriminated union. OpenAI's "required" is translated to Anthropic's
-// "any" for cross-provider ergonomics; specific tool names route to
+// convertToolChoice maps the portable ToolChoice to Anthropic's
+// discriminated union. Specific tool names route to
 // ToolChoiceToolParam.
 func convertToolChoice(tc string) anth.ToolChoiceUnionParam {
 	switch tc {
@@ -83,9 +80,8 @@ func convertToolChoice(tc string) anth.ToolChoiceUnionParam {
 	}
 }
 
-// convertMessages translates conversational turns into Anthropic's
-// content-block shape. System messages get pulled into params.System
-// upstream; here we only handle user / assistant / tool roles.
+// convertMessages translates turns to Anthropic's content-block
+// shape. System messages are pulled into params.System upstream.
 func convertMessages(in []provider.Message) ([]anth.MessageParam, error) {
 	out := make([]anth.MessageParam, 0, len(in))
 	for _, m := range in {
@@ -179,12 +175,9 @@ func convertTool(t provider.ToolDefinition) (anth.ToolUnionParam, error) {
 	return anth.ToolUnionParam{OfTool: &tool}, nil
 }
 
-// cacheControlFromAnnotations reads Message.Annotations["cache_control"]
-// and converts it to the SDK's CacheControlEphemeralParam. Expected
-// shape: map[string]any{"type":"ephemeral","ttl":"5m"|"1h"}. Missing or
-// malformed entries return nil (the adapter emits no cache-control
-// block). Unknown keys are ignored — this is an intentionally lenient
-// escape hatch.
+// cacheControlFromAnnotations converts
+// Annotations["cache_control"]={"type":"ephemeral","ttl":"5m"|"1h"}
+// to the SDK's CacheControlEphemeralParam. Missing/malformed → nil.
 func cacheControlFromAnnotations(ann map[string]any) *anth.CacheControlEphemeralParam {
 	if ann == nil {
 		return nil
@@ -198,8 +191,6 @@ func cacheControlFromAnnotations(ann map[string]any) *anth.CacheControlEphemeral
 		return nil
 	}
 	if t, _ := m["type"].(string); t != "ephemeral" && t != "" {
-		// Only "ephemeral" is documented; ignore other shapes rather
-		// than forward a value the SDK will reject.
 		return nil
 	}
 	cc := anth.NewCacheControlEphemeralParam()
@@ -209,9 +200,8 @@ func cacheControlFromAnnotations(ann map[string]any) *anth.CacheControlEphemeral
 	return &cc
 }
 
-// applyCacheControl sets the cache_control breakpoint on whichever block
-// variant b carries. We branch by block type because ContentBlockParamUnion
-// doesn't expose a generic setter.
+// applyCacheControl sets cache_control on whichever block variant b
+// carries. ContentBlockParamUnion has no generic setter.
 func applyCacheControl(b *anth.ContentBlockParamUnion, cc *anth.CacheControlEphemeralParam) {
 	if cc == nil || b == nil {
 		return

@@ -13,9 +13,8 @@ import (
 	"github.com/jerkeyray/starling/provider"
 )
 
-// openaiStream adapts an *ssestream.Stream[oai.ChatCompletionChunk] to the
-// provider.EventStream contract. It buffers normalized StreamChunk values
-// produced from each SDK chunk and emits them one at a time via Next.
+// openaiStream adapts an *ssestream.Stream[oai.ChatCompletionChunk]
+// to provider.EventStream, buffering normalized StreamChunks.
 type openaiStream struct {
 	sdk      *ssestream.Stream[oai.ChatCompletionChunk]
 	httpResp **http.Response
@@ -97,18 +96,13 @@ func (s *openaiStream) handleChunk(chunk oai.ChatCompletionChunk) {
 		}
 	}
 
-	// Contribute to RawResponseHash using the SDK's unmodified wire bytes.
-	// That keeps the hash reproducible across SDK versions — two replays of
-	// the same server response produce the same digest.
+	// Hash the SDK's raw wire bytes so replays reproduce exactly.
 	if raw := chunk.RawJSON(); raw != "" {
 		_, _ = s.rawHash.Write([]byte(raw))
 	}
 
-	// Terminal usage chunk: empty Choices + populated Usage. We accept
-	// any chunk that reports a positive prompt or completion count;
-	// some OpenAI-compatible backends omit total_tokens but still
-	// populate the breakdown, and gating purely on TotalTokens would
-	// silently drop their accounting.
+	// Terminal usage chunk: empty Choices + populated Usage. Gate on
+	// any positive count since some compat backends omit total_tokens.
 	if len(chunk.Choices) == 0 {
 		u := chunk.Usage
 		if u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0 {

@@ -19,22 +19,17 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// LLMCall performs a single streaming completion against the Provider
-// configured on ctx's step.Context. It emits the canonical event
-// sequence (TurnStarted → (ReasoningEmitted)* → AssistantMessageCompleted)
-// and returns the aggregated provider.Response for the caller to act on.
+// LLMCall performs a single streaming completion. Emits TurnStarted
+// → (ReasoningEmitted)* → AssistantMessageCompleted and returns the
+// aggregated Response.
 //
-// Pre-call input-token budget is enforced against
-// Config.Budget.MaxInputTokens. On breach, a BudgetExceeded event is
-// emitted and ErrBudgetExceeded is returned; no TurnStarted is emitted.
+// Pre-call input-token budget is enforced against MaxInputTokens; on
+// breach, emits BudgetExceeded and returns ErrBudgetExceeded (no
+// TurnStarted). On mid-stream error or ctx cancellation, no
+// AssistantMessageCompleted is emitted — the agent loop emits the
+// terminal RunFailed / RunCancelled event.
 //
-// On mid-stream error or context cancellation, the error is returned
-// unchanged and no AssistantMessageCompleted is emitted — the agent
-// loop (T9) is responsible for emitting the terminal RunFailed /
-// RunCancelled event.
-//
-// Panics if ctx has no step.Context attached, or if the Context was
-// built without a Provider.
+// Panics if ctx has no step.Context or the Context has no Provider.
 func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Response, err error) {
 	c := mustFrom(ctx, "LLMCall")
 	p := c.prov()
@@ -45,8 +40,6 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 		return nil, fmt.Errorf("step.LLMCall: req is nil")
 	}
 
-	// OTel span. No-op tracer when no SDK is configured; ctx is updated
-	// so downstream tool spans become children of this one.
 	ctx, span := obs.StartLLMSpan(ctx, req.Model)
 	defer func() {
 		if err != nil {

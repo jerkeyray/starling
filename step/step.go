@@ -1,11 +1,6 @@
-// Package step is the determinism boundary. Non-deterministic operations
-// the agent loop would otherwise perform directly — reading the clock,
-// generating randomness, calling the LLM, invoking a tool — go through
-// functions in this package so the runtime can record their results in
-// the event log and replay them later.
-//
-// Named "step" (not "runtime") to avoid collision with the stdlib runtime
-// package.
+// Package step is the determinism boundary. Non-deterministic ops
+// (clock, randomness, LLM, tools) route through this package so the
+// runtime can record and replay them.
 package step
 
 import (
@@ -19,24 +14,17 @@ import (
 	"github.com/jerkeyray/starling/internal/cborenc"
 )
 
-// Name values used in SideEffectRecorded for the built-in helpers.
-// User-supplied keys flow through SideEffect with no prefix — callers
-// are responsible for avoiding "now"/"rand".
+// Name values used in SideEffectRecorded for built-in helpers.
+// User keys must avoid "now"/"rand".
 const (
 	ndetNameNow  = "now"
 	ndetNameRand = "rand"
 )
 
-// Now returns the current wall-clock time. In live mode it reads the
-// Context's clock (defaults to time.Now) and records the value as
-// nanoseconds since the Unix epoch. In replay mode it returns the
-// recorded value without consulting the clock.
-//
-// Panics if ctx has no step.Context attached (a non-deterministic
-// value produced without an emitted event makes the run non-replayable,
-// which is a programmer bug). Also panics in replay mode if the next
-// recorded side effect isn't a "now" — the replay verifier recovers
-// these panics and surfaces starling.ErrNonDeterminism.
+// Now returns the current wall-clock time. Live mode reads
+// Context.clockFn and records the value as nanoseconds; replay mode
+// returns the recorded value. Panics if ctx has no step.Context or
+// (in replay) if the next side effect isn't "now".
 func Now(ctx context.Context) time.Time {
 	c := mustFrom(ctx, "Now")
 	if c.mode == ModeReplay {
@@ -58,13 +46,10 @@ func Now(ctx context.Context) time.Time {
 	return t
 }
 
-// Random returns a cryptographically random uint64. In live mode the
-// value is drawn from crypto/rand and recorded as a SideEffectRecorded
-// event with name="rand". In replay mode the recorded value is
-// returned without touching the CSPRNG.
-//
-// Panics if ctx has no step.Context attached (see Now for rationale),
-// if the system's CSPRNG fails, or on a replay-stream mismatch.
+// Random returns a cryptographically random uint64. Live mode draws
+// from crypto/rand and records as SideEffectRecorded{name:"rand"};
+// replay returns the recorded value. Panics on missing ctx,
+// CSPRNG failure, or replay mismatch.
 func Random(ctx context.Context) uint64 {
 	c := mustFrom(ctx, "Random")
 	if c.mode == ModeReplay {
@@ -79,25 +64,16 @@ func Random(ctx context.Context) uint64 {
 		Name:  ndetNameRand,
 		Value: mustEncode(v),
 	}); err != nil {
-		// See step.Now for rationale: the log rejected our write, so
-		// the run is now un-replayable; a panic surfaces the
-		// log-backend fault rather than masking it.
 		panic(fmt.Sprintf("step.Random: event log rejected SideEffectRecorded write (run is now non-replayable): %v", err))
 	}
 	return v
 }
 
-// SideEffect is the escape hatch for arbitrary non-determinism: HTTP
-// calls, filesystem reads, anything a tool might do that's not a clock
-// or an RNG. In live mode it runs fn and records the result as a
-// SideEffectRecorded event under name. In replay mode it decodes the
-// recorded value and returns it without invoking fn.
-//
-// On fn error in live mode the error is propagated and no event is
-// emitted — replay can re-run fn deterministically. T must be
-// CBOR-serialisable.
-//
-// Panics if ctx has no step.Context attached, or on a replay-stream
+// SideEffect records arbitrary non-determinism: HTTP, filesystem,
+// anything beyond clock/RNG. Live mode runs fn and records its
+// result under name; replay decodes the recorded value without
+// invoking fn. fn errors are propagated unrecorded (replay re-runs
+// fn). T must be CBOR-serialisable. Panics on missing ctx or replay
 // mismatch.
 func SideEffect[T any](ctx context.Context, name string, fn func() (T, error)) (T, error) {
 	c := mustFrom(ctx, "SideEffect")
@@ -127,18 +103,14 @@ func SideEffect[T any](ctx context.Context, name string, fn func() (T, error)) (
 	return out, nil
 }
 
-// replayInt64 pops the next SideEffectRecorded from c.recorded, asserts
-// the name matches want, and decodes its value as int64 (or uint64
-// via caller conversion). Panics with an ErrReplayMismatch-wrapped
-// message on any discrepancy — the replay verifier (T17) recovers and
-// converts to starling.ErrNonDeterminism.
+// replayInt64 pops the next SideEffectRecorded, asserts the name
+// matches, and decodes as int64 (falling back to uint64 for Random).
+// Panics on mismatch; the replay verifier recovers.
 func replayInt64(c *Context, want string) int64 {
 	raw := replayRaw(c, want)
 	var out int64
 	if err := cborenc.Unmarshal(raw, &out); err != nil {
-		// uint64 is emitted by Random; decode into that as a fallback
-		// so both Now (int64 nanos) and Random (uint64) can share the
-		// code path without a type tag.
+		// uint64 fallback for Random.
 		var u uint64
 		if uErr := cborenc.Unmarshal(raw, &u); uErr == nil {
 			return int64(u)

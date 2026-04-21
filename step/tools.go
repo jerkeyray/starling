@@ -14,38 +14,26 @@ import (
 	"github.com/jerkeyray/starling/tool"
 )
 
-// ToolResult carries the outcome of a single tool invocation from
-// CallTools. Result holds the tool's JSON output on success (nil on
-// failure). Err is the error returned by the tool, the registry, or a
-// panic — classified and emitted into the log in the usual way. The
-// caller is expected to treat each ToolResult independently (one
-// failing tool does not cancel siblings).
+// ToolResult is the outcome of one tool invocation from CallTools.
+// Result is the tool's JSON output (nil on failure). Err is the
+// tool/registry/panic error. One failing tool does not cancel
+// siblings.
 type ToolResult struct {
 	CallID string
 	Result json.RawMessage
 	Err    error
 }
 
-// ToolCall describes a single tool invocation the caller wants the
-// runtime to execute. The CallID + TurnID pair links the invocation
-// back to the AssistantMessageCompleted that planned it (so replay
-// can match Scheduled/Completed events against the turn that caused
-// them).
+// ToolCall describes a single tool invocation. CallID+TurnID link
+// the invocation back to the AssistantMessageCompleted that planned
+// it. Empty CallID mints a ULID; TurnID has no default (missing
+// TurnID is almost always a caller bug).
 //
-// Callers typically populate ToolCall from a provider.ToolUse returned
-// by LLMCall. CallID empty => a ULID is minted; TurnID is not defaulted
-// because a missing TurnID is almost always a caller bug.
-//
-// Retry: set Idempotent: true and MaxAttempts > 1 to enable retry on
-// transient failures (errors matching tool.ErrTransient via errors.Is).
-// Each retry emits a fresh ToolCallScheduled{Attempt: n} before the
-// call, and ToolCallCompleted/Failed{Attempt: n} after. Backoff
-// controls the sleep between attempts; nil selects an exponential
-// default (100ms base, doubling, cap 10s, 0–25% jitter). Non-idempotent
-// calls run exactly once regardless of MaxAttempts. Callers should set
-// Idempotent only for operations they're comfortable re-executing
-// (pure reads, side-effect-free queries, or operations with caller-
-// supplied idempotency keys).
+// Retry: Idempotent=true with MaxAttempts>1 retries on transient
+// failures (errors.Is tool.ErrTransient). Each attempt emits a fresh
+// ToolCallScheduled/Completed/Failed{Attempt:n}. Nil Backoff uses an
+// exponential default (100ms base, ×2, cap 10s, 0–25% jitter).
+// Non-idempotent calls run exactly once regardless of MaxAttempts.
 type ToolCall struct {
 	CallID      string
 	TurnID      string
@@ -56,25 +44,19 @@ type ToolCall struct {
 	Backoff     func(attempt int) time.Duration
 }
 
-// CallTool invokes the named tool against the Registry configured on
-// ctx's step.Context, emitting ToolCallScheduled before the call and
-// either ToolCallCompleted or ToolCallFailed after.
+// CallTool invokes the named tool, emitting ToolCallScheduled
+// before and ToolCallCompleted/Failed after.
 //
-// Error classification into the event's ErrorType field:
-//   - tool panic                              → "panic"  (err wraps tool.ErrPanicked)
-//   - context cancelled / deadline exceeded   → "cancelled"
-//   - tool not in registry                    → "tool"   (err is ErrToolNotFound)
-//   - any other error returned by the tool    → "tool"
+// ErrorType classification:
+//   - "panic"     — tool panicked (wraps tool.ErrPanicked)
+//   - "cancelled" — ctx cancelled / deadline exceeded
+//   - "tool"      — ErrToolNotFound or any error returned by the tool
 //
-// A per-tool watchdog ("timeout" classification) is tracked as future
-// work.
+// Retry (Idempotent+MaxAttempts>1): every attempt emits its own
+// Scheduled+Completed/Failed pair with Attempt:n. Retries only on
+// tool.ErrTransient; ctx errors and ErrToolNotFound are terminal.
 //
-// When ToolCall opts into retry (Idempotent + MaxAttempts>1), every
-// attempt emits its own Scheduled + Completed/Failed pair carrying
-// Attempt: n. Retry happens only on tool.ErrTransient; ctx errors and
-// ErrToolNotFound are always terminal.
-//
-// Panics if ctx has no step.Context attached.
+// Panics if ctx has no step.Context.
 func CallTool(ctx context.Context, call ToolCall) (json.RawMessage, error) {
 	c := mustFrom(ctx, "CallTool")
 

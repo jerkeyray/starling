@@ -13,24 +13,12 @@ import (
 	"github.com/jerkeyray/starling/provider"
 )
 
-// geminiStream adapts the genai SDK's streaming iterator to Starling's
-// provider.EventStream. The SDK exposes a range-over-func iterator
-// (iter.Seq2[*GenerateContentResponse, error]); we pull one frame at
-// a time via iter.Pull2 and translate each frame into zero or more
-// normalized StreamChunk values that get enqueued.
-//
-// Gemini's SSE shape differs from OpenAI/Anthropic in three ways that
-// the translator has to smooth out:
-//
-//  1. Tool-call args arrive complete in one part, not as a stream of
-//     deltas. We emit the canonical Start + single Delta + End
-//     sequence so step.LLMCall's accumulator handles it identically.
-//  2. UsageMetadata is populated only on the final frame, not
-//     incrementally like Anthropic's message_delta.
-//  3. There is no TOOL_USE finish reason — a tool call still finishes
-//     with STOP. We override the normalized StopReason to "tool_use"
-//     when at least one functionCall was observed so downstream code
-//     can branch identically to OpenAI/Anthropic.
+// geminiStream adapts the genai SDK's iter.Seq2 stream to
+// provider.EventStream, normalizing Gemini's quirks: tool-call args
+// arrive complete in one part (emitted as Start+Delta+End),
+// UsageMetadata lands only on the final frame, and a finished tool
+// call reports STOP (remapped to "tool_use" when any functionCall
+// was seen).
 type geminiStream struct {
 	next func() (*genai.GenerateContentResponse, error, bool)
 	stop func()
@@ -99,19 +87,15 @@ func (s *geminiStream) Next(ctx context.Context) (provider.StreamChunk, error) {
 	}
 }
 
-// handleResponse translates one Gemini streamed response frame into
-// zero or more StreamChunks. Each frame is a full
-// GenerateContentResponse with partial candidate content.
+// handleResponse translates one streamed frame into zero or more
+// StreamChunks.
 func (s *geminiStream) handleResponse(resp *genai.GenerateContentResponse) {
 	if resp == nil {
 		return
 	}
 
-	// Hash the marshaled form of each frame so RawResponseHash
-	// depends on the payload shape rather than the SDK's struct
-	// layout. Two replays of the same server frames yield the same
-	// digest. The SDK doesn't expose per-frame raw bytes, so this is
-	// the closest deterministic substitute.
+	// Hash marshaled frames (SDK doesn't expose raw bytes) so
+	// RawResponseHash is deterministic across replays.
 	if raw, err := json.Marshal(resp); err == nil {
 		_, _ = s.rawHash.Write(raw)
 	}
@@ -120,8 +104,8 @@ func (s *geminiStream) handleResponse(resp *genai.GenerateContentResponse) {
 		s.providerReqID = resp.ResponseID
 	}
 
-	// UsageMetadata normally only lands on the final frame, but some
-	// proxies emit it incrementally; take the latest non-nil values.
+	// UsageMetadata usually only lands on the final frame; overwrite
+	// on every non-nil occurrence.
 	if u := resp.UsageMetadata; u != nil {
 		s.usage.InputTokens = int64(u.PromptTokenCount)
 		s.usage.OutputTokens = int64(u.CandidatesTokenCount)
@@ -146,10 +130,9 @@ func (s *geminiStream) handleResponse(resp *genai.GenerateContentResponse) {
 }
 
 // handlePart emits StreamChunks for a single Part. Text parts become
-// ChunkText; FunctionCall parts become the canonical Start + Delta +
-// End trio. Other part kinds (executable code, code results, thought
-// traces, inline/file data) are currently ignored — they'd require
-// interface extensions the core doesn't model yet.
+// ChunkText; FunctionCall parts become the canonical Start+Delta+End
+// trio. Other part kinds (executable code, inline/file data) are
+// ignored.
 func (s *geminiStream) handlePart(p *genai.Part) {
 	if p == nil {
 		return
@@ -160,10 +143,7 @@ func (s *geminiStream) handlePart(p *genai.Part) {
 		s.sawToolCall = true
 		callID := fc.ID
 		if callID == "" {
-			// The Gemini API doesn't always emit an ID on function
-			// calls; fall back to the name so downstream CallID
-			// bookkeeping has a stable handle. Multiple unnamed
-			// concurrent calls are rare in practice.
+			// Gemini sometimes omits the ID; fall back to the name.
 			callID = fc.Name
 		}
 		argsJSON, err := json.Marshal(fc.Args)
@@ -192,10 +172,8 @@ func (s *geminiStream) handlePart(p *genai.Part) {
 		)
 
 	case p.Text != "":
-		// Thought-trace parts carry Text too, but are flagged via the
-		// Thought bool. Drop them here since provider.ChunkReasoning's
-		// semantics (Anthropic-shaped signature plumbing) don't match
-		// Gemini's format.
+		// Drop thought-trace parts; ChunkReasoning's shape is
+		// Anthropic-specific.
 		if p.Thought {
 			return
 		}
@@ -206,12 +184,9 @@ func (s *geminiStream) handlePart(p *genai.Part) {
 	}
 }
 
-// translateFinishReason maps Gemini's FinishReason enum into the
-// portable stop-reason string the step package expects. If a
-// functionCall was observed this turn, the normalized stop is
-// "tool_use" regardless of the underlying finish — Gemini always
-// reports STOP for tool-call completions, but downstream code
-// branches on the portable string to pump the tool loop.
+// translateFinishReason maps Gemini's FinishReason to the portable
+// stop-reason string. Any turn with a functionCall normalizes to
+// "tool_use" (Gemini reports STOP for tool-call completions).
 func translateFinishReason(r genai.FinishReason, sawToolCall bool) string {
 	if sawToolCall && (r == genai.FinishReasonStop || r == "") {
 		return "tool_use"
@@ -237,8 +212,7 @@ func translateFinishReason(r genai.FinishReason, sawToolCall bool) string {
 	return string(r)
 }
 
-// flushTerminal emits the ChunkUsage + ChunkEnd pair once the SDK
-// iterator has drained. Called exactly once.
+// flushTerminal emits ChunkUsage + ChunkEnd once. Called exactly once.
 func (s *geminiStream) flushTerminal() {
 	if s.usageSeen {
 		u := s.usage

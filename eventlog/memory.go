@@ -183,28 +183,11 @@ func (m *memoryLog) Stream(ctx context.Context, runID string) (<-chan event.Even
 
 	ch := make(chan event.Event, streamBufferSize)
 
-	// Subscribe-then-deliver-history. The subscriber is registered
-	// synchronously under the lock so any Append issued after this
-	// Stream call returns is guaranteed to reach ch — that's the
-	// contract replay.Stream and the inspector rely on (subscribe BEFORE
-	// the producer starts emitting; lose nothing).
-	//
-	// History delivery has two regimes:
-	//
-	//   - History fits in the channel buffer: deliver inline under the
-	//     lock. Cheap, ordered, no goroutine.
-	//
-	//   - History overflows the buffer: pump from a goroutine. This
-	//     used to truncate to the first streamBufferSize events and
-	//     close the channel — a real data-loss bug for long runs, which
-	//     are exactly the runs the inspector/replay UI is meant to make
-	//     visible. Now every event is delivered. Caveat: when the
-	//     producer keeps Appending while the history pump is still
-	//     running, the live events may interleave with late history
-	//     events on ch. Strict "history first then live" ordering is
-	//     only guaranteed when nothing is appending concurrently — the
-	//     case both replay.Stream (empty sink at subscribe time) and
-	//     the inspector (completed runs) actually use.
+	// Subscribe-then-deliver-history under the lock so Appends
+	// issued after Stream returns reach ch. If history fits in the
+	// buffer, deliver inline; otherwise pump from a goroutine. Note:
+	// strict history-then-live ordering holds only when nothing
+	// Appends concurrently with the pump.
 	history := make([]event.Event, len(rs.events))
 	copy(history, rs.events)
 

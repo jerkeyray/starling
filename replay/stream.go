@@ -1,17 +1,6 @@
-// Stream — channel-based replay execution.
-//
-// Stream re-executes a recorded run step-by-step and pushes a
-// ReplayStep to the returned channel for every event emitted. Used by
-// the inspector's replay UI to drive the side-by-side timeline as
-// each event lands; also usable headless by callers who want to react
-// per-event without waiting for the whole run to finish.
-//
-// Divergence: in replay mode the agent loop bails on the first
-// mismatch (the recorded payload is the source of truth and the
-// re-executed code can't reasonably continue once it doesn't agree).
-// Stream surfaces that as a final ReplayStep with Diverged=true and
-// DivergenceReason populated, then closes the channel. v1 is
-// "first-divergence wins"; richer continuation is M6+.
+// Channel-based replay execution. On divergence, emits a final
+// ReplayStep with Diverged=true and closes the channel
+// (first-divergence-wins).
 
 package replay
 

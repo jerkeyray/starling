@@ -1,11 +1,6 @@
 // Package gemini adapts the Google Gemini API to Starling's Provider
-// interface with streaming and usage-update normalization.
-//
-// The adapter wraps google.golang.org/genai for HTTP + SSE transport,
-// but all payload translation lives here so the normalized StreamChunk
-// sequence stays stable across SDK versions. Only the Gemini API
-// backend is supported today; Vertex AI (OAuth / service-account auth)
-// is a deliberate non-goal for this milestone.
+// interface. Wraps google.golang.org/genai for transport; payload
+// translation lives here. Vertex AI backend is not supported.
 package gemini
 
 import (
@@ -20,8 +15,6 @@ import (
 )
 
 // New constructs a Provider that talks to the Gemini API.
-// WithBaseURL / WithHTTPClient can redirect to a test server or a
-// compatible proxy.
 func New(opts ...Option) (provider.Provider, error) {
 	cfg := config{
 		providerID: "gemini",
@@ -63,13 +56,11 @@ type config struct {
 	apiVersion string
 }
 
-// WithAPIKey sets the API key used for authentication. If unset, the
-// underlying SDK falls back to the GEMINI_API_KEY or GOOGLE_API_KEY
-// environment variable.
+// WithAPIKey sets the API key. If unset, the SDK falls back to
+// GEMINI_API_KEY / GOOGLE_API_KEY.
 func WithAPIKey(key string) Option { return func(c *config) { c.apiKey = key } }
 
-// WithBaseURL overrides the API base URL. Useful for tests and for
-// routing through compatible proxies.
+// WithBaseURL overrides the API base URL.
 func WithBaseURL(url string) Option { return func(c *config) { c.baseURL = url } }
 
 // WithHTTPClient supplies a custom *http.Client.
@@ -77,14 +68,10 @@ func WithHTTPClient(c *http.Client) Option {
 	return func(cfg *config) { cfg.httpClient = c }
 }
 
-// WithProviderID overrides the Info().ID string. Useful when a
-// compatibility proxy wants to identify itself distinctly in the event
-// log. Defaults to "gemini".
+// WithProviderID overrides Info().ID. Defaults to "gemini".
 func WithProviderID(id string) Option { return func(c *config) { c.providerID = id } }
 
-// WithAPIVersion overrides the Info().APIVersion string and the API
-// version used on the wire. Defaults to "v1beta" — the current stable
-// Gemini REST endpoint prefix.
+// WithAPIVersion overrides the API version. Defaults to "v1beta".
 func WithAPIVersion(v string) Option { return func(c *config) { c.apiVersion = v } }
 
 type geminiProvider struct {
@@ -105,10 +92,6 @@ func (p *geminiProvider) Stream(ctx context.Context, req *provider.Request) (pro
 	if err != nil {
 		return nil, err
 	}
-
-	// Kick off the streaming call. The SDK returns an iter.Seq2 that
-	// yields one GenerateContentResponse per SSE frame; we pull from
-	// it one chunk at a time via iter.Pull2 inside newGeminiStream.
 	iter := p.client.Models.GenerateContentStream(ctx, req.Model, contents, genCfg)
 	return newGeminiStream(iter), nil
 }
