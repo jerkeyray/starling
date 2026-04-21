@@ -52,6 +52,16 @@ type EventLog interface {
 	// appended after subscription (live). The channel is closed when ctx is
 	// cancelled, when the log is closed, or when the subscriber falls far
 	// enough behind that its buffer overflows.
+	//
+	// Ordering caveat: strict history-then-live delivery is only
+	// guaranteed when no Append is in flight. Under concurrent Appends,
+	// backends may interleave late history with live events (the
+	// in-memory backend's long-history pump is the canonical example —
+	// see memory.go's Stream). Consumers that need exactly-once,
+	// monotonically-increasing Seq delivery must track the highest Seq
+	// received and discard anything ev.Seq <= lastSeen. inspect/live.go
+	// is the reference pattern; its
+	// TestLiveStream_LongHistory_ConcurrentAppend exercises this path.
 	Stream(ctx context.Context, runID string) (<-chan event.Event, error)
 
 	// Close releases all resources and closes every live subscriber
@@ -69,8 +79,8 @@ type EventLog interface {
 //	    ...
 //	}
 //
-// Both built-in backends (NewInMemory, NewSQLite) satisfy this
-// interface.
+// All built-in backends (NewInMemory, NewSQLite, NewPostgres)
+// satisfy this interface.
 type RunLister interface {
 	// ListRuns returns one RunSummary per run present in the log,
 	// ordered by StartedAt descending (newest first). An empty log
