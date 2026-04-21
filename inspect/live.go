@@ -30,6 +30,8 @@ type liveFrame struct {
 //     backend's documented history/live interleave
 //     (eventlog/memory.go:201-207). The snapshot is our source of
 //     ordered history; Stream is only used as a future-events pump.
+//     TestLiveStream_LongHistory_ConcurrentAppend is the regression
+//     guard — removing the lastSent check below makes it fail.
 //
 // Closes on: first terminal event, ctx cancel, or closed Stream chan.
 // Responds 404 if the run has no events. Query param:

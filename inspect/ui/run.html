@@ -25,7 +25,8 @@
 </header>
 
 <section class="run-pane">
-  <div>
+  <div class="timeline-pane">
+    <h2 class="pane-label">Event timeline</h2>
     <div class="timeline-head">
       <input id="timeline-filter"
              type="search"
@@ -38,13 +39,14 @@
       {{range .Rows}}{{template "event_row.html" .}}{{end}}
     </ol>
     <div class="hint-row">
-      <span><span class="kbd">j</span> / <span class="kbd">k</span> navigate</span>
+      <span><span class="kbd">j</span> down · <span class="kbd">k</span> up</span>
       <span><span class="kbd">/</span> focus filter</span>
       <span><span class="kbd">Esc</span> clear</span>
     </div>
   </div>
 
   <aside id="detail" class="detail">
+    <h2 class="pane-label">Event detail</h2>
     {{template "event_detail.html" .Initial}}
   </aside>
 </section>

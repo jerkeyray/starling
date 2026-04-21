@@ -31,5 +31,16 @@
   </dl>
 </header>
 
-<pre class="payload-json"><code>{{.JSON}}</code></pre>
+<div class="payload-wrap">
+  <pre class="payload-json"><code>{{.JSON}}</code></pre>
+  <button type="button" class="log-copy-fab"
+          data-copy="{{.JSON}}"
+          title="Copy this event's JSON"
+          aria-label="copy event JSON">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="5" y="5" width="9" height="9" rx="1.5"/>
+      <path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11"/>
+    </svg>
+  </button>
+</div>
 {{end}}

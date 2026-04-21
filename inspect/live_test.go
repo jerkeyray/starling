@@ -264,6 +264,142 @@ func TestLiveStream_RowHTMLIsSanitized(t *testing.T) {
 	}
 }
 
+// TestLiveStream_LongHistory_ConcurrentAppend forces the in-memory
+// backend's long-history pump path (history > streamBufferSize=256) and
+// concurrently appends more events plus a terminal while the SSE
+// consumer is reading. Asserts the client sees every Seq exactly once,
+// in strictly ascending order, with the terminal last — proving
+// handleEventStream's lastSent filter correctly tolerates the
+// documented history/live interleave in memory.go's pump.
+//
+// Regression guard: removing the `ev.Seq <= lastSent` check in
+// inspect/live.go must make this test fail.
+func TestLiveStream_LongHistory_ConcurrentAppend(t *testing.T) {
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+
+	const runID = "r-long"
+	const seeded = 300  // > streamBufferSize (256)
+	const appended = 20 // live appends during streaming
+	const terminalSeq = seeded + appended + 1
+
+	seedLongRun(t, log, runID, seeded)
+
+	srv, err := New(log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	hs := httptest.NewServer(srv)
+	t.Cleanup(hs.Close)
+
+	// Kick off the live appender slightly after the client connects so
+	// at least some of the appends land during the snapshot catch-up
+	// (exercising the tail loop's dedup against the pump's replay of
+	// history).
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		time.Sleep(20 * time.Millisecond)
+		for i := 1; i <= appended; i++ {
+			appendTurnStarted(t, log, runID, uint64(seeded+i))
+		}
+		appendRunCompleted(t, log, runID, terminalSeq)
+	}()
+
+	events := readSSE(t, hs.URL+"/run/"+runID+"/events/stream", 10*time.Second)
+	<-done
+
+	frames := filterLiveFrames(t, events)
+	want := int(terminalSeq)
+	if len(frames) != want {
+		t.Fatalf("event frames = %d, want %d", len(frames), want)
+	}
+	seen := make(map[uint64]bool, want)
+	var prev uint64
+	for i, f := range frames {
+		if seen[f.Seq] {
+			t.Fatalf("frame[%d]: duplicate Seq=%d", i, f.Seq)
+		}
+		seen[f.Seq] = true
+		if f.Seq <= prev {
+			t.Fatalf("frame[%d]: Seq=%d not strictly ascending (prev=%d)", i, f.Seq, prev)
+		}
+		prev = f.Seq
+	}
+	for i := uint64(1); i <= terminalSeq; i++ {
+		if !seen[i] {
+			t.Errorf("missing Seq=%d", i)
+		}
+	}
+	if !frames[len(frames)-1].Terminal {
+		t.Errorf("last frame Terminal = false, want true")
+	}
+	if countEvents(events, "end") != 1 {
+		t.Errorf("end events = %d, want 1", countEvents(events, "end"))
+	}
+}
+
+// TestLiveStream_ReconnectSinceNoDuplicates simulates the browser's
+// reconnect path after a dropped SSE connection: consume the first N
+// frames from stream A, close it, append more events, then open stream
+// B with ?since=N. Asserts stream B emits only events with Seq > N
+// (no duplicates of 1..N) and closes on the terminal.
+//
+// Regression guard: if handleEventStream ever skips the `ev.Seq <= since`
+// check at live.go:82, this test fails because the 1..3 frames
+// re-appear on the second stream.
+func TestLiveStream_ReconnectSinceNoDuplicates(t *testing.T) {
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+
+	const runID = "r-reconnect"
+	seedRunStartedOnly(t, log, runID)
+	appendTurnStarted(t, log, runID, 2)
+	appendTurnStarted(t, log, runID, 3)
+
+	srv, err := New(log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	hs := httptest.NewServer(srv)
+	t.Cleanup(hs.Close)
+
+	// Stream A: non-terminal run, so readSSE would hang until timeout.
+	// readSSEFor collects what the server emits during a short window,
+	// then closes the client side (mimicking a tab close / network drop).
+	streamA := readSSEFor(t, hs.URL+"/run/"+runID+"/events/stream", 250*time.Millisecond)
+	framesA := filterLiveFrames(t, streamA)
+	if len(framesA) != 3 {
+		t.Fatalf("stream A frames = %d, want 3", len(framesA))
+	}
+
+	// After disconnect: append two more non-terminal events, then terminal.
+	appendTurnStarted(t, log, runID, 4)
+	appendTurnStarted(t, log, runID, 5)
+	appendRunCompleted(t, log, runID, 6)
+
+	// Stream B reconnects with since=3 — the client remembers the last
+	// Seq it rendered. Expect exactly 3 frames, Seqs {4,5,6}, terminal
+	// last, and none of 1..3 re-emitted.
+	streamB := readSSE(t, hs.URL+"/run/"+runID+"/events/stream?since=3", 5*time.Second)
+	framesB := filterLiveFrames(t, streamB)
+	if len(framesB) != 3 {
+		t.Fatalf("stream B frames = %d, want 3", len(framesB))
+	}
+	wantSeqs := []uint64{4, 5, 6}
+	for i, f := range framesB {
+		if f.Seq != wantSeqs[i] {
+			t.Errorf("stream B frame[%d] Seq = %d, want %d", i, f.Seq, wantSeqs[i])
+		}
+		if f.Seq <= 3 {
+			t.Errorf("stream B frame[%d] Seq=%d: re-emitted pre-since event", i, f.Seq)
+		}
+	}
+	if !framesB[len(framesB)-1].Terminal {
+		t.Errorf("stream B last frame Terminal = false, want true")
+	}
+}
+
 // --- local helpers ---------------------------------------------------
 
 // seedRunStartedOnly appends a single RunStarted event, leaving the
@@ -315,6 +451,69 @@ func appendTurnStarted(t *testing.T, log eventlog.EventLog, runID string, seq ui
 	}
 	if err := log.Append(context.Background(), runID, ev); err != nil {
 		t.Fatalf("append TurnStarted: %v", err)
+	}
+}
+
+// seedLongRun appends RunStarted (seq=1) plus n-1 TurnStarted events,
+// leaving the run non-terminal at Seq=n. Used to force the in-memory
+// backend's long-history pump path (history > streamBufferSize=256).
+// Builds the hash chain locally rather than re-Reading after each
+// append — O(n) instead of O(n²) for n in the hundreds.
+func seedLongRun(t *testing.T, log eventlog.EventLog, runID string, n int) {
+	t.Helper()
+	if n < 1 {
+		t.Fatalf("seedLongRun: n=%d, want >=1", n)
+	}
+	ctx := context.Background()
+	now := time.Now().UnixNano()
+
+	rsPayload, err := event.EncodePayload(event.RunStarted{
+		SchemaVersion: event.SchemaVersion,
+		Goal:          "long-history test",
+		ProviderID:    "fake",
+		APIVersion:    "v1",
+		ModelID:       "m",
+	})
+	if err != nil {
+		t.Fatalf("encode RunStarted: %v", err)
+	}
+	first := event.Event{
+		RunID:     runID,
+		Seq:       1,
+		Timestamp: now,
+		Kind:      event.KindRunStarted,
+		Payload:   rsPayload,
+	}
+	if err := log.Append(ctx, runID, first); err != nil {
+		t.Fatalf("append RunStarted: %v", err)
+	}
+	prevEnc, err := event.Marshal(first)
+	if err != nil {
+		t.Fatalf("marshal seq=1: %v", err)
+	}
+	prev := event.Hash(prevEnc)
+
+	for i := 2; i <= n; i++ {
+		payload, err := event.EncodePayload(event.TurnStarted{TurnID: fmt.Sprintf("t%d", i)})
+		if err != nil {
+			t.Fatalf("encode TurnStarted seq=%d: %v", i, err)
+		}
+		ev := event.Event{
+			RunID:     runID,
+			Seq:       uint64(i),
+			PrevHash:  prev,
+			Timestamp: now + int64(i),
+			Kind:      event.KindTurnStarted,
+			Payload:   payload,
+		}
+		if err := log.Append(ctx, runID, ev); err != nil {
+			t.Fatalf("append seq=%d: %v", i, err)
+		}
+		enc, err := event.Marshal(ev)
+		if err != nil {
+			t.Fatalf("marshal seq=%d: %v", i, err)
+		}
+		prev = event.Hash(enc)
 	}
 }
 

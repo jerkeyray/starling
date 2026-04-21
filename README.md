@@ -240,7 +240,8 @@ A self-contained web UI for browsing event logs: runs list, event
 timeline, per-event detail, a hash-chain validation badge, and —
 when you wire it into your own binary — replay-from-UI with the
 recorded and re-executed streams rendered side-by-side. No CDN, no
-JS build step, no auth (loopback only by default).
+JS build step. Loopback-only by default, with optional bearer-token
+auth when you need to expose it beyond localhost.
 
 **View-only** — install the standalone binary, point it at a SQLite
 log:

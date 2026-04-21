@@ -148,12 +148,13 @@
     if (!btn) return;
     e.preventDefault();
     var text = btn.getAttribute("data-copy") || "";
+    var iconOnly = !!btn.querySelector("svg");
     var done = function () {
       var prev = btn.textContent;
-      btn.textContent = "copied";
       btn.classList.add("copied");
+      if (!iconOnly) btn.textContent = "copied";
       setTimeout(function () {
-        btn.textContent = prev;
+        if (!iconOnly) btn.textContent = prev;
         btn.classList.remove("copied");
       }, 1200);
     };
