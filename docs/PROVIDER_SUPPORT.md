@@ -1,9 +1,15 @@
 # Provider support matrix
 
 Starling's `Provider` interface is vendor-neutral: anything that can
-produce a stream of `StreamChunk` values fits. Two in-tree adapters
-ship today — OpenAI and Anthropic. This page is the current truth
-about what each one does and what is intentionally deferred.
+produce a stream of `StreamChunk` values fits. Four in-tree adapters
+ship today — OpenAI, Anthropic, Gemini, and OpenRouter. This page is
+the current truth about what each one does and what is intentionally
+deferred.
+
+The OpenAI / Anthropic columns below are the most exhaustively tested.
+Gemini and OpenRouter implement the same `Provider` contract; refer to
+their package READMEs (`provider/gemini`, `provider/openrouter`) for
+adapter-specific knobs.
 
 Anything marked **n/a** reflects a feature the underlying provider
 simply doesn't offer; **deferred** means the feature exists upstream
@@ -37,7 +43,7 @@ but Starling hasn't wired it yet.
 | Citations (`citations_delta`)           | Deferred — five citation-location variants deserve a unified cross-provider abstraction. |
 | Structured outputs (`response_format` / `output_config.json_schema`) | Deferred — design a unified shape once both sides have shipped it stably. |
 | `service_tier`, `inference_geo`, `container`, `metadata.user_id` | Route through `Request.Params` CBOR escape hatch today; promote to first-class fields if broadly adopted. |
-| MCP connectors                          | Deferred to M4 per `temp_notes/M2_PLAN.md`.                 |
+| MCP connectors                          | Deferred — adapter from MCP tools into `tool.Tool` is on the roadmap (W-series P2). |
 
 ## Pricing
 

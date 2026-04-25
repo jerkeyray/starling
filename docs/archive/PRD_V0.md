@@ -1,4 +1,13 @@
-# Starling — PRD v2
+# Starling — PRD v2 (HISTORICAL)
+
+> **Archived.** This document captures the original pre-build design.
+> Several decisions described here were superseded during
+> implementation (notably the WAL backend "walrus" — replaced by
+> SQLite/Postgres — and MCP-as-native, which is now adapter-only). For
+> current behavior consult `docs/EVENTS.md`, `docs/ARCHITECTURE.md`,
+> `docs/DEPLOYMENT.md`, and `docs/SECURITY.md`. Kept in `archive/` for
+> design-history reference.
+
 > event-sourced agent runtime for Go  
 > status: pre-build / design phase  
 > last updated: apr 2026

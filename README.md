@@ -292,6 +292,10 @@ picture and §6.2 for the synchronous-write / backpressure contract.
 - [`docs/REPLAY_DEBUGGING.md`](./docs/REPLAY_DEBUGGING.md) — debugging failed runs with replay + inspector
 - [`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md) — provider feature matrix
 - [`docs/INSPECT.md`](./docs/INSPECT.md) — `starling-inspect` web inspector
+- [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model, auth, secrets, hash-chain semantics
+- [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — process model, backends, migrations, Docker/k8s
+- [`docs/PERF_TUNING.md`](./docs/PERF_TUNING.md) — append latency, stream buffering, replay throughput
+- [`docs/RETENTION.md`](./docs/RETENTION.md) — deletion, archive, partitioning, PII
 
 ## License
 

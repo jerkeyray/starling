@@ -122,21 +122,39 @@ type chainBuilder struct {
 	prevHash []byte
 }
 
-// next returns a fresh Event with valid Seq and PrevHash. The payload
-// is a UserMessageAppended carrying content so events are distinct.
+// next returns a fresh Event with valid Seq and PrevHash. The very
+// first event for a chain is a RunStarted (so semantic validation
+// passes); subsequent events are UserMessageAppended carrying content
+// so events are distinct.
 func (cb *chainBuilder) next(t *testing.T, runID, content string) event.Event {
 	t.Helper()
-	payload, err := event.EncodePayload(event.UserMessageAppended{Content: content})
+	cb.seq++
+	var (
+		kind    event.Kind
+		payload []byte
+		err     error
+	)
+	if cb.seq == 1 {
+		kind = event.KindRunStarted
+		payload, err = event.EncodePayload(event.RunStarted{
+			SchemaVersion: event.SchemaVersion,
+			Goal:          content,
+			ProviderID:    "test",
+			ModelID:       "test",
+		})
+	} else {
+		kind = event.KindUserMessageAppended
+		payload, err = event.EncodePayload(event.UserMessageAppended{Content: content})
+	}
 	if err != nil {
 		t.Fatalf("EncodePayload: %v", err)
 	}
-	cb.seq++
 	ev := event.Event{
 		RunID:     runID,
 		Seq:       cb.seq,
 		PrevHash:  cb.prevHash,
 		Timestamp: int64(cb.seq) * 1_000_000,
-		Kind:      event.KindUserMessageAppended,
+		Kind:      kind,
 		Payload:   payload,
 	}
 	encoded, err := event.Marshal(ev)
@@ -526,8 +544,8 @@ func TestContract_ListRuns_PerRunSummary(t *testing.T) {
 			if r2.LastSeq != 1 {
 				t.Errorf("r2.LastSeq = %d, want 1", r2.LastSeq)
 			}
-			if r2.TerminalKind != event.KindUserMessageAppended {
-				t.Errorf("r2.TerminalKind = %s, want UserMessageAppended", r2.TerminalKind)
+			if r2.TerminalKind != event.KindRunStarted {
+				t.Errorf("r2.TerminalKind = %s, want RunStarted", r2.TerminalKind)
 			}
 			if r2.TerminalKind.IsTerminal() {
 				t.Errorf("r2.TerminalKind.IsTerminal() = true, want false")

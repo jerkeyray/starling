@@ -67,6 +67,13 @@
 **Decision:** Every tool invocation emits `ToolCallScheduled` then either `ToolCallCompleted` or `ToolCallFailed`. Retries append new `ToolCallCompleted|Failed` events sharing `call_id` with incrementing `attempt`. Originals are never mutated.
 **Consequences:** Users reconstructing per-call history iterate events sharing `call_id`. Budget enforcement can trigger between Scheduled and Completed (log `BudgetExceeded` event with `call_id` reference).
 
+> **Update (2026-04):** `eventlog.Validate` now enforces this pairing
+> semantically: every `ToolCallScheduled` must have exactly one
+> `ToolCallCompleted` or `ToolCallFailed` with the same `(CallID,
+> Attempt)`. A `RunResumed` seam (kind 15) clears pending pairings —
+> orphaned schedules from a crashed run are not required to close after
+> the seam, since `Resume` reissues them under fresh `CallID`s.
+
 ---
 
 ## D-008 — Per-run hash chain; optional Merkle root
@@ -88,6 +95,14 @@
 ---
 
 ## D-010 — Event log default: in-memory (M1), SQLite + Postgres (M2), pluggable everywhere
+
+> **Update (2026-04):** Both backends now ship behind a forward-only
+> migration system (`eventlog.Migrate`, `eventlog.SchemaVersion`,
+> `eventlog.Preflight`). `Agent.Run` / `Resume` and the inspector
+> refuse to operate against a stale or too-new schema. SQLite v2
+> renames the legacy `events` table to `eventlog_events` so dump/restore
+> is symmetric across backends. See `docs/DEPLOYMENT.md` § Schema
+> migrations.
 
 **Status:** Accepted (supersedes PRD §15's walrus direction — walrus is not prod-grade and building a bespoke WAL is not the value prop)
 **Context:** M1 needs something fast. M2 needs a durable, crash-safe backend. Target users split into two groups: (a) CLI tools / single-server deploys / demos — want zero ops, and (b) backend services — already have Postgres.
@@ -120,10 +135,16 @@ A generic helper `tool.Typed[In, Out](name, desc, fn)` wraps this for users who 
 
 ## D-012 — MCP: optional in M1, native in M4
 
-**Status:** Accepted (matches PRD §15)
+**Status:** Superseded — see *Updates* below.
 **Context:** MCP is the emerging tool standard. Worth native support, but not critical for the POC.
 **Decision:** M1–M3 ship without MCP. M4 adds a native MCP adapter: an MCP server's exposed tools become `Tool` instances. Users can pre-M4 shim MCP manually if they want.
 **Consequences:** M1 doesn't block on MCP spec churn. M4 adds credibility for the launch ("speaks the protocol").
+
+> **Update (2026-04):** MCP integration is descoped to an *adapter* —
+> map MCP server tools onto `tool.Tool` — rather than a "native"
+> integration. The core agent runtime stays MCP-agnostic; an external
+> `provider/mcp` package will translate. Shipped after the production-ops
+> workstream (see W-series P2 in the implementation plan).
 
 ---
 
@@ -140,6 +161,12 @@ When estimated cost ≥ budget: watchdog calls `cancel()` on the request context
 ---
 
 ## D-014 — Provider API version recorded in events (versioning deferred to M5)
+
+> **Update (2026-04):** Four adapters ship — OpenAI, Anthropic, Gemini,
+> OpenRouter. `RawResponseHash` may be enforced strictly via
+> `Config.RequireRawResponseHash` for audit-critical deployments. A
+> shared provider conformance suite is on the roadmap (W4) and will
+> become the canonical contract test for any new adapter.
 
 **Status:** Accepted (matches PRD §15)
 **Context:** Model providers deprecate and version. Can't solve it v0, but must not paint ourselves into a corner.
