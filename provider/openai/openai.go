@@ -96,6 +96,16 @@ func (p *openaiProvider) Info() provider.Info {
 	return provider.Info{ID: p.cfg.providerID, APIVersion: p.cfg.apiVersion}
 }
 
+func (p *openaiProvider) Capabilities() provider.Capabilities {
+	return provider.Capabilities{
+		Tools:         true,
+		ToolChoice:    true,
+		Reasoning:     true,
+		StopSequences: true,
+		RequestID:     true,
+	}
+}
+
 func (p *openaiProvider) Stream(ctx context.Context, req *provider.Request) (provider.EventStream, error) {
 	if req == nil {
 		return nil, errors.New("openai: nil Request")

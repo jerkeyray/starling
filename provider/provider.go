@@ -36,6 +36,22 @@ type Provider interface {
 	Stream(ctx context.Context, req *Request) (EventStream, error)
 }
 
+// Capabilities advertises the optional features a provider supports.
+type Capabilities struct {
+	Tools         bool
+	ToolChoice    bool
+	Reasoning     bool
+	StopSequences bool
+	CacheControl  bool
+	RequestID     bool
+}
+
+// Capabler is the optional interface adapters implement to advertise
+// their Capabilities.
+type Capabler interface {
+	Capabilities() Capabilities
+}
+
 // Role identifies the sender of a Message.
 type Role string
 

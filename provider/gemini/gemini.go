@@ -83,6 +83,14 @@ func (p *geminiProvider) Info() provider.Info {
 	return provider.Info{ID: p.cfg.providerID, APIVersion: p.cfg.apiVersion}
 }
 
+func (p *geminiProvider) Capabilities() provider.Capabilities {
+	return provider.Capabilities{
+		Tools:         true,
+		StopSequences: true,
+		RequestID:     true,
+	}
+}
+
 func (p *geminiProvider) Stream(ctx context.Context, req *provider.Request) (provider.EventStream, error) {
 	if req == nil {
 		return nil, errors.New("gemini: nil Request")

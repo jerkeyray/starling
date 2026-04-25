@@ -52,7 +52,24 @@ func New(opts ...Option) (provider.Provider, error) {
 	if httpClient != nil {
 		oaiOpts = append(oaiOpts, openai.WithHTTPClient(httpClient))
 	}
-	return openai.New(oaiOpts...)
+	inner, err := openai.New(oaiOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return &openrouterProvider{Provider: inner}, nil
+}
+
+type openrouterProvider struct {
+	provider.Provider
+}
+
+func (p *openrouterProvider) Capabilities() provider.Capabilities {
+	return provider.Capabilities{
+		Tools:         true,
+		ToolChoice:    true,
+		StopSequences: true,
+		RequestID:     true,
+	}
 }
 
 // Option configures the OpenRouter provider.
