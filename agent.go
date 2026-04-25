@@ -72,6 +72,11 @@ func (a *Agent) Run(ctx context.Context, goal string) (*RunResult, error) {
 	if err := a.validate(); err != nil {
 		return nil, err
 	}
+	if !a.Config.SkipSchemaCheck {
+		if err := eventlog.Preflight(ctx, a.Log); err != nil {
+			return nil, err
+		}
+	}
 	return a.runWithID(ctx, a.mintRunID(), goal)
 }
 

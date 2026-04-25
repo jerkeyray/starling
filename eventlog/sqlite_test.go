@@ -76,7 +76,7 @@ func TestSQLite_TamperedPayloadFailsValidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE events SET payload = ? WHERE run_id = ? AND seq = ?`,
+	if _, err := db.Exec(`UPDATE eventlog_events SET payload = ? WHERE run_id = ? AND seq = ?`,
 		[]byte{0x00}, "run-1", 2); err != nil {
 		t.Fatalf("tamper: %v", err)
 	}

@@ -135,6 +135,9 @@ func (c *InspectCmd) Run(args []string) error {
 		return fmt.Errorf("open log: %w", err)
 	}
 	defer store.Close()
+	if err := eventlog.Preflight(context.Background(), store); err != nil {
+		return err
+	}
 
 	// Token precedence: explicit field > --token flag > env var.
 	token := c.Token

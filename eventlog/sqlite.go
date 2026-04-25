@@ -74,8 +74,17 @@ func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error) {
 			return nil, err
 		}
 	}
-	return &sqliteLog{db: db, readOnly: cfg.readOnly}, nil
+	log := &sqliteLog{db: db, readOnly: cfg.readOnly}
+	if !cfg.readOnly {
+		if _, err := log.migrate(context.Background(), false); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
+	return log, nil
 }
+
+func timeNowUnixNano() int64 { return time.Now().UnixNano() }
 
 func initSQLite(db *sql.DB) error {
 	pragmas := []string{
@@ -88,19 +97,112 @@ func initSQLite(db *sql.DB) error {
 			return fmt.Errorf("eventlog/sqlite: %s: %w", p, err)
 		}
 	}
-	schema := `CREATE TABLE IF NOT EXISTS events (
-		run_id    TEXT    NOT NULL,
-		seq       INTEGER NOT NULL,
-		prev_hash BLOB,
-		ts        INTEGER NOT NULL,
-		kind      INTEGER NOT NULL,
-		payload   BLOB    NOT NULL,
-		PRIMARY KEY (run_id, seq)
-	)`
-	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("eventlog/sqlite: create schema: %w", err)
+	return nil
+}
+
+// sqliteMigrations are forward-only DDL steps applied in order.
+//
+//	v1 — create eventlog_events with the M1 column set.
+//	v2 — adopt the canonical name on legacy databases that were created
+//	     when the table was called "events".
+var sqliteMigrations = []migration{
+	{
+		version: 1,
+		stmts: []string{
+			`CREATE TABLE IF NOT EXISTS eventlog_events (
+				run_id    TEXT    NOT NULL,
+				seq       INTEGER NOT NULL,
+				prev_hash BLOB,
+				ts        INTEGER NOT NULL,
+				kind      INTEGER NOT NULL,
+				payload   BLOB    NOT NULL,
+				PRIMARY KEY (run_id, seq)
+			)`,
+		},
+	},
+	{
+		version: 2,
+		apply: func(ctx context.Context, tx *sql.Tx) error {
+			var legacy int
+			if err := tx.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='events'`,
+			).Scan(&legacy); err != nil {
+				return err
+			}
+			if legacy == 0 {
+				return nil
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO eventlog_events SELECT * FROM events`); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `DROP TABLE events`)
+			return err
+		},
+	},
+}
+
+func ensureSQLiteMetaTable(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS `+metaTable+` (
+			version    INTEGER PRIMARY KEY,
+			applied_at INTEGER NOT NULL
+		)`)
+	if err != nil {
+		return fmt.Errorf("eventlog/sqlite: create %s: %w", metaTable, err)
 	}
 	return nil
+}
+
+func sqliteCurrentVersion(ctx context.Context, db *sql.DB) (int, error) {
+	if err := ensureSQLiteMetaTable(ctx, db); err != nil {
+		return 0, err
+	}
+	var v int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM `+metaTable,
+	).Scan(&v); err != nil {
+		return 0, fmt.Errorf("eventlog/sqlite: read schema version: %w", err)
+	}
+	return v, nil
+}
+
+func (s *sqliteLog) currentVersion(ctx context.Context) (int, error) {
+	return sqliteCurrentVersion(ctx, s.db)
+}
+
+func (s *sqliteLog) expectedVersion() int { return latestVersion(sqliteMigrations) }
+
+func (s *sqliteLog) migrate(ctx context.Context, dryRun bool) (MigrationReport, error) {
+	if s.readOnly {
+		return MigrationReport{}, ErrReadOnly
+	}
+	if err := ensureSQLiteMetaTable(ctx, s.db); err != nil {
+		return MigrationReport{}, err
+	}
+	current, err := sqliteCurrentVersion(ctx, s.db)
+	if err != nil {
+		return MigrationReport{}, err
+	}
+	latest := latestVersion(sqliteMigrations)
+	if current > latest {
+		return MigrationReport{}, fmt.Errorf("%w: db=%d binary=%d", ErrSchemaTooNew, current, latest)
+	}
+	applied, err := applyMigrations(ctx, s.db, current, sqliteMigrations, sqliteRecordVersion, dryRun)
+	report := MigrationReport{Backend: "sqlite", From: current, Applied: applied, DryRun: dryRun}
+	if len(applied) > 0 {
+		report.To = applied[len(applied)-1]
+	} else {
+		report.To = current
+	}
+	return report, err
+}
+
+func sqliteRecordVersion(ctx context.Context, tx *sql.Tx, version int) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO `+metaTable+` (version, applied_at) VALUES (?, ?)`,
+		version, timeNowUnixNano(),
+	)
+	return err
 }
 
 type sqliteLog struct {
@@ -141,7 +243,7 @@ func (s *sqliteLog) Append(ctx context.Context, runID string, ev event.Event) er
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO events(run_id, seq, prev_hash, ts, kind, payload)
+		`INSERT INTO eventlog_events(run_id, seq, prev_hash, ts, kind, payload)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		ev.RunID, int64(ev.Seq), ev.PrevHash, ev.Timestamp, int64(ev.Kind), []byte(ev.Payload),
 	); err != nil {
@@ -160,7 +262,7 @@ func (s *sqliteLog) Append(ctx context.Context, runID string, ev event.Event) er
 func readLastLocked(ctx context.Context, tx *sql.Tx, runID string) (*event.Event, error) {
 	row := tx.QueryRowContext(ctx,
 		`SELECT seq, prev_hash, ts, kind, payload
-		 FROM events WHERE run_id = ? ORDER BY seq DESC LIMIT 1`,
+		 FROM eventlog_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1`,
 		runID,
 	)
 	ev, err := scanEvent(row, runID)
@@ -213,7 +315,7 @@ func (s *sqliteLog) Read(ctx context.Context, runID string) ([]event.Event, erro
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT seq, prev_hash, ts, kind, payload
-		 FROM events WHERE run_id = ? ORDER BY seq`,
+		 FROM eventlog_events WHERE run_id = ? ORDER BY seq`,
 		runID,
 	)
 	if err != nil {
@@ -266,7 +368,7 @@ func (s *sqliteLog) streamLoop(ctx context.Context, runID string, ch chan<- even
 	emit := func() bool {
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT seq, prev_hash, ts, kind, payload
-			 FROM events WHERE run_id = ? AND seq > ? ORDER BY seq`,
+			 FROM eventlog_events WHERE run_id = ? AND seq > ? ORDER BY seq`,
 			runID, lastSeq,
 		)
 		if err != nil {
@@ -334,10 +436,10 @@ func (s *sqliteLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			run_id,
-			(SELECT ts   FROM events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
+			(SELECT ts   FROM eventlog_events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
 			MAX(seq) AS last_seq,
-			(SELECT kind FROM events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind
-		FROM events e
+			(SELECT kind FROM eventlog_events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind
+		FROM eventlog_events e
 		GROUP BY run_id
 	`)
 	if err != nil {

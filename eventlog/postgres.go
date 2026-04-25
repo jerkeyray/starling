@@ -45,21 +45,26 @@ import (
 // rationale, different constant so we can tune independently.
 const pgStreamPollInterval = 50 * time.Millisecond
 
-// pgSchema is the one-table schema. Exported via InstallSchema; also
-// applied by NewPostgres when WithAutoMigratePG is set.
-//
-// Kept deliberately simple: no trigger-based validation, no row-level
-// security, no tablespace hints. Users who want those apply them in
-// their own migration pipeline against the same column names.
-const pgSchema = `CREATE TABLE IF NOT EXISTS eventlog_events (
-    run_id     TEXT     NOT NULL,
-    seq        BIGINT   NOT NULL,
-    prev_hash  BYTEA,
-    ts         BIGINT   NOT NULL,
-    kind       INTEGER  NOT NULL,
-    payload    BYTEA    NOT NULL,
-    PRIMARY KEY (run_id, seq)
-)`
+// pgMigrations are forward-only DDL steps applied by Migrate. v1 is
+// the initial M2 schema; users who managed schema externally before
+// migrations existed will have their existing eventlog_events table
+// detected and stamped as v1.
+var pgMigrations = []migration{
+	{
+		version: 1,
+		stmts: []string{
+			`CREATE TABLE IF NOT EXISTS eventlog_events (
+                run_id     TEXT     NOT NULL,
+                seq        BIGINT   NOT NULL,
+                prev_hash  BYTEA,
+                ts         BIGINT   NOT NULL,
+                kind       INTEGER  NOT NULL,
+                payload    BYTEA    NOT NULL,
+                PRIMARY KEY (run_id, seq)
+            )`,
+		},
+	},
+}
 
 // PostgresOption configures a Postgres-backed EventLog.
 type PostgresOption func(*postgresConfig)
@@ -87,15 +92,107 @@ func WithAutoMigratePG() PostgresOption {
 	return func(c *postgresConfig) { c.autoMigrate = true }
 }
 
-// InstallSchema creates the eventlog_events table if it does not
-// exist. Idempotent. Forward-only; future migrations ship as a
-// separate Migrate function that detects the current version and
-// applies deltas.
+// InstallSchema brings db up to the latest schema version. Idempotent.
+// Equivalent to calling Migrate on a *postgresLog handle wrapping db.
 func InstallSchema(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, pgSchema); err != nil {
+	if err := ensurePGMetaTable(ctx, db); err != nil {
+		return err
+	}
+	current, err := pgCurrentVersion(ctx, db)
+	if err != nil {
+		return err
+	}
+	latest := latestVersion(pgMigrations)
+	if current > latest {
+		return fmt.Errorf("%w: db=%d binary=%d", ErrSchemaTooNew, current, latest)
+	}
+	if _, err := applyMigrations(ctx, db, current, pgMigrations, pgRecordVersion, false); err != nil {
 		return fmt.Errorf("eventlog/postgres: install schema: %w", err)
 	}
 	return nil
+}
+
+func ensurePGMetaTable(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS `+metaTable+` (
+            version    INTEGER PRIMARY KEY,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`)
+	if err != nil {
+		return fmt.Errorf("eventlog/postgres: create %s: %w", metaTable, err)
+	}
+	return nil
+}
+
+func pgCurrentVersion(ctx context.Context, db *sql.DB) (int, error) {
+	if err := ensurePGMetaTable(ctx, db); err != nil {
+		return 0, err
+	}
+	var v int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM `+metaTable,
+	).Scan(&v); err != nil {
+		return 0, fmt.Errorf("eventlog/postgres: read schema version: %w", err)
+	}
+	if v == 0 {
+		// Legacy database created with the pre-migration InstallSchema:
+		// the events table exists but no migration row was recorded.
+		var legacy int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_name = 'eventlog_events'`,
+		).Scan(&legacy); err != nil {
+			return 0, fmt.Errorf("eventlog/postgres: detect legacy schema: %w", err)
+		}
+		if legacy > 0 {
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO `+metaTable+` (version) VALUES (1) ON CONFLICT DO NOTHING`,
+			); err != nil {
+				return 0, fmt.Errorf("eventlog/postgres: stamp v1: %w", err)
+			}
+			return 1, nil
+		}
+	}
+	return v, nil
+}
+
+func pgRecordVersion(ctx context.Context, tx *sql.Tx, version int) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO `+metaTable+` (version) VALUES ($1)`,
+		version,
+	)
+	return err
+}
+
+func (p *postgresLog) currentVersion(ctx context.Context) (int, error) {
+	return pgCurrentVersion(ctx, p.db)
+}
+
+func (p *postgresLog) expectedVersion() int { return latestVersion(pgMigrations) }
+
+func (p *postgresLog) migrate(ctx context.Context, dryRun bool) (MigrationReport, error) {
+	if p.readOnly {
+		return MigrationReport{}, ErrReadOnly
+	}
+	if err := ensurePGMetaTable(ctx, p.db); err != nil {
+		return MigrationReport{}, err
+	}
+	current, err := pgCurrentVersion(ctx, p.db)
+	if err != nil {
+		return MigrationReport{}, err
+	}
+	latest := latestVersion(pgMigrations)
+	if current > latest {
+		return MigrationReport{}, fmt.Errorf("%w: db=%d binary=%d", ErrSchemaTooNew, current, latest)
+	}
+	applied, err := applyMigrations(ctx, p.db, current, pgMigrations, pgRecordVersion, dryRun)
+	report := MigrationReport{Backend: "postgres", From: current, Applied: applied, DryRun: dryRun}
+	if len(applied) > 0 {
+		report.To = applied[len(applied)-1]
+	} else {
+		report.To = current
+	}
+	return report, err
 }
 
 // NewPostgres returns an EventLog backed by Postgres. The caller owns

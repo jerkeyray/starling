@@ -64,6 +64,11 @@ func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts
 	if err := a.validate(); err != nil {
 		return nil, err
 	}
+	if !a.Config.SkipSchemaCheck {
+		if err := eventlog.Preflight(ctx, a.Log); err != nil {
+			return nil, err
+		}
+	}
 	if runID == "" {
 		return nil, fmt.Errorf("starling: Resume: runID is empty")
 	}

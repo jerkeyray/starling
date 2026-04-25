@@ -32,6 +32,12 @@ type Config struct {
 	// 32-byte hash.
 	RequireRawResponseHash bool
 
+	// SkipSchemaCheck disables the pre-flight schema-version check that
+	// Run, Resume, and Replay run against the event log. Reserved for
+	// tests and tooling that intentionally point at a database older
+	// than the binary.
+	SkipSchemaCheck bool
+
 	// Logger receives structured slog records covering the run lifecycle:
 	// RunStarted, per-turn start, budget trips, tool retries, and the
 	// terminal event. Every record carries a "run_id" attribute; per-turn
