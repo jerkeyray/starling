@@ -85,6 +85,10 @@ type Config struct {
 	// only the interface so it doesn't pull the client_golang
 	// dependency into the core loop.
 	Metrics MetricsSink
+
+	// RequireRawResponseHash makes LLMCall fail if the provider's
+	// ChunkEnd lacks a 32-byte hash.
+	RequireRawResponseHash bool
 }
 
 // MetricsSink is the narrow interface step.Context uses to record
@@ -134,3 +138,11 @@ var ErrToolNotFound = errors.New("step: tool not found")
 // expected — a name mismatch, a missing event, or a type-decode
 // failure. The replay verifier wraps this into starling.ErrNonDeterminism.
 var ErrReplayMismatch = errors.New("step: replay mismatch")
+
+// ErrMissingRawResponseHash is returned when ChunkEnd lacks a 32-byte
+// hash and RequireRawResponseHash is set.
+var ErrMissingRawResponseHash = errors.New("step: provider returned empty RawResponseHash")
+
+// ErrInvalidStream is returned when the provider stream violates the
+// chunk state machine.
+var ErrInvalidStream = errors.New("step: invalid provider stream")

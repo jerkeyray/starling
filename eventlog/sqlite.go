@@ -50,14 +50,16 @@ func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	dsn := path
+	// _txlock=immediate makes BeginTx grab the write lock upfront,
+	// closing the read-then-insert window. busy_timeout must be set
+	// per-connection (the pool opens new ones on demand), so it goes
+	// on the DSN, not just initSQLite. immutable=1 is intentionally
+	// not used: the inspector reads files a writer is appending to.
+	var dsn string
 	if cfg.readOnly {
-		// modernc.org/sqlite honors URI parameters when path begins
-		// with "file:". mode=ro opens read-only; we deliberately do
-		// NOT set immutable=1 because the inspector must remain
-		// correct against a database a live writer is appending to,
-		// and immutable=1 would suppress WAL / change-counter checks.
-		dsn = "file:" + path + "?mode=ro"
+		dsn = "file:" + path + "?mode=ro&_pragma=busy_timeout(5000)"
+	} else {
+		dsn = "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)"
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -124,22 +126,11 @@ func (s *sqliteLog) Append(ctx context.Context, runID string, ev event.Event) er
 	}
 	s.mu.RUnlock()
 
-	// BEGIN IMMEDIATE acquires the write lock up front so two
-	// concurrent Appends serialize here rather than racing the
-	// read-then-insert.
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("eventlog/sqlite: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		// modernc.org/sqlite's BeginTx already starts a DEFERRED
-		// transaction, so an explicit BEGIN IMMEDIATE inside it errors.
-		// That's fine — DEFERRED escalates to a write lock on the first
-		// INSERT, which still serializes writers. Swallow the error.
-		_ = err
-	}
 
 	last, err := readLastLocked(ctx, tx, runID)
 	if err != nil {

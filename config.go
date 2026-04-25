@@ -28,6 +28,10 @@ type Config struct {
 	// 0 means unlimited — not recommended.
 	MaxTurns int
 
+	// RequireRawResponseHash fails any turn whose ChunkEnd lacks a
+	// 32-byte hash.
+	RequireRawResponseHash bool
+
 	// Logger receives structured slog records covering the run lifecycle:
 	// RunStarted, per-turn start, budget trips, tool retries, and the
 	// terminal event. Every record carries a "run_id" attribute; per-turn

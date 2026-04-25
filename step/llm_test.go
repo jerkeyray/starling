@@ -395,3 +395,93 @@ func TestLLMCall_Deterministic(t *testing.T) {
 		t.Fatalf("AMC payloads (TurnID zeroed) differ across runs:\n a: %x\n b: %x", a, b)
 	}
 }
+
+func TestLLMCall_RequireRawResponseHash_FailsOnEmpty(t *testing.T) {
+	chunks := []provider.StreamChunk{
+		{Kind: provider.ChunkText, Text: "hi"},
+		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+		// ChunkEnd with no RawResponseHash.
+		{Kind: provider.ChunkEnd, StopReason: "stop"},
+	}
+	p := &fakeProvider{stream: &fakeStream{chunks: chunks}}
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+	c := step.MustNewContext(step.Config{
+		Log:                    log,
+		RunID:                  "run-strict",
+		Provider:               p,
+		RequireRawResponseHash: true,
+	})
+	ctx := step.WithContext(context.Background(), c)
+
+	_, err := step.LLMCall(ctx, &provider.Request{Model: "gpt-4o-mini"})
+	if !errors.Is(err, step.ErrMissingRawResponseHash) {
+		t.Fatalf("err = %v, want ErrMissingRawResponseHash", err)
+	}
+}
+
+func TestLLMCall_RequireRawResponseHash_AcceptsValid(t *testing.T) {
+	chunks := []provider.StreamChunk{
+		{Kind: provider.ChunkText, Text: "hi"},
+		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+		{Kind: provider.ChunkEnd, StopReason: "stop", RawResponseHash: bytes.Repeat([]byte{0xAB}, event.HashSize)},
+	}
+	p := &fakeProvider{stream: &fakeStream{chunks: chunks}}
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+	c := step.MustNewContext(step.Config{
+		Log:                    log,
+		RunID:                  "run-strict-ok",
+		Provider:               p,
+		RequireRawResponseHash: true,
+	})
+	ctx := step.WithContext(context.Background(), c)
+
+	if _, err := step.LLMCall(ctx, &provider.Request{Model: "gpt-4o-mini"}); err != nil {
+		t.Fatalf("LLMCall: %v", err)
+	}
+}
+
+func TestLLMCall_RejectsEOFBeforeChunkEnd(t *testing.T) {
+	chunks := []provider.StreamChunk{
+		{Kind: provider.ChunkText, Text: "hi"},
+		// No ChunkEnd: stream EOFs early.
+	}
+	p := &fakeProvider{stream: &fakeStream{chunks: chunks}}
+	ctx, _ := newLLMCtx(t, p, step.BudgetConfig{})
+
+	_, err := step.LLMCall(ctx, &provider.Request{Model: "gpt-4o-mini"})
+	if !errors.Is(err, step.ErrInvalidStream) {
+		t.Fatalf("err = %v, want ErrInvalidStream", err)
+	}
+}
+
+func TestLLMCall_RejectsDuplicateToolUseStart(t *testing.T) {
+	chunks := []provider.StreamChunk{
+		{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "x"}},
+		{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "x"}},
+	}
+	p := &fakeProvider{stream: &fakeStream{chunks: chunks}}
+	ctx, _ := newLLMCtx(t, p, step.BudgetConfig{})
+
+	_, err := step.LLMCall(ctx, &provider.Request{Model: "gpt-4o-mini"})
+	if !errors.Is(err, step.ErrInvalidStream) {
+		t.Fatalf("err = %v, want ErrInvalidStream", err)
+	}
+}
+
+func TestLLMCall_RejectsChunkAfterEnd(t *testing.T) {
+	chunks := []provider.StreamChunk{
+		{Kind: provider.ChunkText, Text: "hi"},
+		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+		{Kind: provider.ChunkEnd, StopReason: "stop"},
+		{Kind: provider.ChunkText, Text: "after"}, // illegal
+	}
+	p := &fakeProvider{stream: &fakeStream{chunks: chunks}}
+	ctx, _ := newLLMCtx(t, p, step.BudgetConfig{})
+
+	_, err := step.LLMCall(ctx, &provider.Request{Model: "gpt-4o-mini"})
+	if !errors.Is(err, step.ErrInvalidStream) {
+		t.Fatalf("err = %v, want ErrInvalidStream", err)
+	}
+}

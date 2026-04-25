@@ -2,7 +2,7 @@
 
 > Exact schema for every event type. Wire format is canonical CBOR (RFC 8949 §4.2).
 > Schema version 1. Changes before v1.0 may be breaking; after v1.0, only additive.
-> Last updated: apr 2026
+> Last updated: apr 2026 — kind 15 corrected to `RunResumed`; `TurnFailed` reserved at 16; `ReasoningEmitted.Signature`/`Redacted` documented; validation section aligned with `eventlog.Validate`.
 
 ---
 
@@ -53,7 +53,8 @@ const (
     KindRunCompleted          Kind = 12
     KindRunFailed             Kind = 13
     KindRunCancelled          Kind = 14
-    KindTurnFailed            Kind = 15   // reserved for M3 streaming failures
+    KindRunResumed            Kind = 15   // non-terminal seam appended by (*Agent).Resume
+    // Kind = 16 reserved for KindTurnFailed (mid-turn streaming failure with retry).
 )
 ```
 
@@ -125,8 +126,17 @@ type ReasoningEmitted struct {
     TurnID    string `cbor:"turn_id"`
     Content   string `cbor:"content"`
     Sensitive bool   `cbor:"sensitive"`  // always true; present for schema symmetry
+    Signature []byte `cbor:"signature,omitempty"` // Anthropic per-block integrity signature; replayed verbatim
+    Redacted  bool   `cbor:"redacted,omitempty"`  // true → Content is opaque redacted_thinking payload, not plaintext
 }
 ```
+
+`Signature` and `Redacted` are Anthropic-specific. OpenAI/Gemini adapters
+leave them unset. The signature must be sent back to Anthropic on
+subsequent turns for the server to accept the assistant message, so it
+is recorded here to keep replays byte-faithful. When `Redacted` is true
+the `Content` field carries the opaque server-supplied payload, not
+plaintext reasoning, and must round-trip unchanged.
 
 ### 3.5 AssistantMessageCompleted (Kind=5)
 
@@ -272,9 +282,31 @@ type RunCancelled struct {
 }
 ```
 
-### 3.15 TurnFailed (Kind=15) — M3
+### 3.15 RunResumed (Kind=15) — non-terminal seam
 
-Reserved. Fires when a streaming LLM call fails mid-turn but run continues (retry). Not emitted in M1.
+Appended by `(*Agent).Resume` when re-entering a run that was started in a
+previous process. Events before `RunResumed` were written by the original
+process; events after were written by the resuming process. `RunResumed`
+is the only non-terminal "seam" event in the schema.
+
+```go
+type RunResumed struct {
+    AtSeq        uint64 `cbor:"at_seq"`        // last seq from the prior process (PrevHash hashes that event)
+    ExtraMessage string `cbor:"extra_message,omitempty"` // mirrors the extraMessage arg; followed by UserMessageAppended if non-empty
+    ReissueTools bool   `cbor:"reissue_tools"` // WithReissueTools decision
+    PendingCalls int    `cbor:"pending_calls"` // open ToolCallScheduled count at the resume point
+}
+```
+
+A `RunResumed` event resets turn / tool-call pairing accounting for
+validation purposes: orphaned schedules from the prior process remain in
+the log for audit but are not required to have matching outcomes after
+the seam (they are reissued under fresh `CallID`s).
+
+### 3.16 TurnFailed (Kind=16) — reserved
+
+Reserved for a future mid-turn streaming failure that allows the run to
+continue with a retry. Not emitted today.
 
 ---
 
@@ -283,8 +315,8 @@ Reserved. Fires when a streaming LLM call fails mid-turn but run continues (retr
 1. **Seq is monotonic per run.** Starts at 1. No gaps, no duplicates.
 2. **First event is always `RunStarted`.** `PrevHash = nil`.
 3. **Last event is always one of `RunCompleted`, `RunFailed`, `RunCancelled`.** These carry the Merkle root.
-4. **`TurnStarted` always followed by `AssistantMessageCompleted`, `BudgetExceeded`, or `TurnFailed` (M3+)** — same `turn_id`. No other terminal states for a turn.
-5. **`ToolCallScheduled` always followed by `ToolCallCompleted` or `ToolCallFailed`** — same `call_id` and `attempt`.
+4. **`TurnStarted` always followed by `AssistantMessageCompleted` or `BudgetExceeded`** — same `turn_id` — before the next `TurnStarted`. An open turn at run terminal is allowed only when the terminal is `RunFailed` or `RunCancelled`. (`TurnFailed`, kind 16, is reserved for future mid-turn retry semantics.)
+5. **`ToolCallScheduled` always followed by `ToolCallCompleted` or `ToolCallFailed`** — same `call_id` and `attempt` — unless a `RunResumed` seam intervenes (orphaned calls from the prior process are reissued under fresh `CallID`s).
 6. **Retries share `call_id`, increment `attempt`.** Original events never mutated.
 7. **Reasoning events are optional.** A `TurnStarted` may or may not produce a `ReasoningEmitted` before `AssistantMessageCompleted`.
 8. **Hash chain integrity.** Any event's `PrevHash` equals BLAKE3 of canonical CBOR of the full previous event.
@@ -294,17 +326,29 @@ Reserved. Fires when a streaming LLM call fails mid-turn but run continues (retr
 
 ## 5. Validation rules
 
-A well-formed log satisfies all invariants above. The `replay.Validate(runID)` function checks:
+A well-formed log satisfies all invariants above. The `eventlog.Validate`
+function checks (see `eventlog/validate.go`):
 
-1. Seq monotonicity
-2. First event is `RunStarted`, schema version supported
-3. Terminal event exists and is exactly one of the three terminal kinds
-4. Hash chain unbroken
-5. Turn pairing: every `TurnStarted` has a matching terminal turn event
-6. Call pairing: every `ToolCallScheduled` has a matching `ToolCallCompleted`/`ToolCallFailed` with same `call_id`, `attempt`
-7. Merkle root matches recomputed root
+1. Slice non-empty, `events[0].Seq == 1`, monotonic seq with no gaps.
+2. `RunID` consistent and non-empty across all events.
+3. Hash chain unbroken — each `PrevHash` equals BLAKE3 of canonical CBOR
+   of the previous event.
+4. Exactly one terminal event, only as the last event.
+5. **First event is `RunStarted` with `SchemaVersion` ∈ [1, current].**
+6. **Turn pairing:** every `TurnStarted` is closed by a same-`TurnID`
+   `AssistantMessageCompleted` or `BudgetExceeded` before the next
+   `TurnStarted`. An open turn at the terminal is allowed only when the
+   terminal is `RunFailed` or `RunCancelled`.
+7. **Call pairing:** every `ToolCallScheduled` has exactly one matching
+   `ToolCallCompleted` or `ToolCallFailed` with the same `(CallID,
+   Attempt)`. Outcomes without a prior schedule, or duplicate outcomes
+   for the same key, are rejected. A `RunResumed` seam clears pending
+   pairing state — orphans from the prior process are not required to
+   close after the seam.
+8. Merkle root in the terminal payload matches the recomputed BLAKE3
+   Merkle root over every pre-terminal event.
 
-Invalid log → `ErrLogCorrupt` with a field locating the violation.
+Invalid log → `ErrLogCorrupt` with a diagnostic locating the violation.
 
 ---
 

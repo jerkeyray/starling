@@ -8,21 +8,8 @@ import (
 	"github.com/jerkeyray/starling/internal/merkle"
 )
 
-// Validate verifies the integrity of a full run's event slice. The
-// events must be in the order they were appended. Validate checks:
-//
-//  1. The slice is non-empty.
-//  2. events[0].Seq == 1 and every subsequent Seq increments by one.
-//  3. RunID is identical and non-empty across all events.
-//  4. events[0].PrevHash is empty/nil; each later PrevHash equals
-//     event.Hash(event.Marshal(prev)).
-//  5. Exactly one terminal event (RunCompleted/RunFailed/RunCancelled)
-//     appears, and only as the last event.
-//  6. The terminal payload's MerkleRoot equals the Merkle root over
-//     every pre-terminal event's canonical-CBOR hash.
-//
-// On success returns nil. On failure returns an error wrapping
-// ErrLogCorrupt with a concise diagnostic.
+// Validate verifies the integrity of a full run's event slice. Returns
+// an error wrapping ErrLogCorrupt on the first violation found.
 func Validate(events []event.Event) error {
 	if len(events) == 0 {
 		return fmt.Errorf("%w: no events", ErrLogCorrupt)
@@ -31,6 +18,9 @@ func Validate(events []event.Event) error {
 		return err
 	}
 	if err := validateTerminal(events); err != nil {
+		return err
+	}
+	if err := validateSemantics(events); err != nil {
 		return err
 	}
 	return validateMerkleRoot(events)
@@ -102,6 +92,112 @@ func validateMerkleRoot(events []event.Event) error {
 	want := merkle.Root(leaves)
 	if !bytes.Equal(stored, want) {
 		return fmt.Errorf("%w: merkle root mismatch", ErrLogCorrupt)
+	}
+	return nil
+}
+
+func validateSemantics(events []event.Event) error {
+	if events[0].Kind != event.KindRunStarted {
+		return fmt.Errorf("%w: event[0].Kind = %s, want RunStarted", ErrLogCorrupt, events[0].Kind)
+	}
+	rs, err := events[0].AsRunStarted()
+	if err != nil {
+		return fmt.Errorf("%w: decode RunStarted: %v", ErrLogCorrupt, err)
+	}
+	if rs.SchemaVersion == 0 || rs.SchemaVersion > event.SchemaVersion {
+		return fmt.Errorf("%w: RunStarted.SchemaVersion %d unsupported (max %d)", ErrLogCorrupt, rs.SchemaVersion, event.SchemaVersion)
+	}
+
+	// Turn pairing: open turn must close before the next TurnStarted.
+	// An open turn at the terminal is only allowed when the run itself
+	// failed or was cancelled.
+	openTurn := ""
+	type callKey struct {
+		ID      string
+		Attempt uint32
+	}
+	openCalls := map[callKey]bool{}
+
+	for i, ev := range events {
+		switch ev.Kind {
+		case event.KindRunResumed:
+			openTurn = ""
+			openCalls = map[callKey]bool{}
+			continue
+		case event.KindTurnStarted:
+			if openTurn != "" {
+				return fmt.Errorf("%w: TurnStarted at index %d while turn %q is still open", ErrLogCorrupt, i, openTurn)
+			}
+			ts, err := ev.AsTurnStarted()
+			if err != nil {
+				return fmt.Errorf("%w: decode TurnStarted at %d: %v", ErrLogCorrupt, i, err)
+			}
+			if ts.TurnID == "" {
+				return fmt.Errorf("%w: TurnStarted at %d has empty TurnID", ErrLogCorrupt, i)
+			}
+			openTurn = ts.TurnID
+		case event.KindAssistantMessageCompleted:
+			amc, err := ev.AsAssistantMessageCompleted()
+			if err != nil {
+				return fmt.Errorf("%w: decode AssistantMessageCompleted at %d: %v", ErrLogCorrupt, i, err)
+			}
+			if amc.TurnID != openTurn {
+				return fmt.Errorf("%w: AssistantMessageCompleted at %d turn %q, want open turn %q", ErrLogCorrupt, i, amc.TurnID, openTurn)
+			}
+			openTurn = ""
+		case event.KindBudgetExceeded:
+			be, err := ev.AsBudgetExceeded()
+			if err != nil {
+				return fmt.Errorf("%w: decode BudgetExceeded at %d: %v", ErrLogCorrupt, i, err)
+			}
+			if openTurn != "" && be.TurnID != "" && be.TurnID != openTurn {
+				return fmt.Errorf("%w: BudgetExceeded at %d turn %q, want open turn %q", ErrLogCorrupt, i, be.TurnID, openTurn)
+			}
+			openTurn = ""
+		case event.KindToolCallScheduled:
+			tcs, err := ev.AsToolCallScheduled()
+			if err != nil {
+				return fmt.Errorf("%w: decode ToolCallScheduled at %d: %v", ErrLogCorrupt, i, err)
+			}
+			if tcs.CallID == "" {
+				return fmt.Errorf("%w: ToolCallScheduled at %d has empty CallID", ErrLogCorrupt, i)
+			}
+			k := callKey{ID: tcs.CallID, Attempt: tcs.Attempt}
+			if openCalls[k] {
+				return fmt.Errorf("%w: ToolCallScheduled at %d duplicates open call %s/attempt=%d", ErrLogCorrupt, i, k.ID, k.Attempt)
+			}
+			openCalls[k] = true
+		case event.KindToolCallCompleted:
+			tcc, err := ev.AsToolCallCompleted()
+			if err != nil {
+				return fmt.Errorf("%w: decode ToolCallCompleted at %d: %v", ErrLogCorrupt, i, err)
+			}
+			k := callKey{ID: tcc.CallID, Attempt: tcc.Attempt}
+			if !openCalls[k] {
+				return fmt.Errorf("%w: ToolCallCompleted at %d has no matching schedule (call=%s attempt=%d)", ErrLogCorrupt, i, k.ID, k.Attempt)
+			}
+			delete(openCalls, k)
+		case event.KindToolCallFailed:
+			tcf, err := ev.AsToolCallFailed()
+			if err != nil {
+				return fmt.Errorf("%w: decode ToolCallFailed at %d: %v", ErrLogCorrupt, i, err)
+			}
+			k := callKey{ID: tcf.CallID, Attempt: tcf.Attempt}
+			if !openCalls[k] {
+				return fmt.Errorf("%w: ToolCallFailed at %d has no matching schedule (call=%s attempt=%d)", ErrLogCorrupt, i, k.ID, k.Attempt)
+			}
+			delete(openCalls, k)
+		}
+	}
+
+	last := events[len(events)-1]
+	if openTurn != "" && last.Kind == event.KindRunCompleted {
+		return fmt.Errorf("%w: turn %q still open at RunCompleted", ErrLogCorrupt, openTurn)
+	}
+	if len(openCalls) > 0 && last.Kind == event.KindRunCompleted {
+		for k := range openCalls {
+			return fmt.Errorf("%w: ToolCallScheduled (call=%s attempt=%d) has no matching outcome at RunCompleted", ErrLogCorrupt, k.ID, k.Attempt)
+		}
 	}
 	return nil
 }

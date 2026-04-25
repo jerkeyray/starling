@@ -155,14 +155,21 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 		return emit(ctx, c, event.KindReasoningEmitted, ev)
 	}
 
-drain:
+	streamEnded := false
+
 	for {
 		chunk, nerr := stream.Next(ctx)
 		if nerr != nil {
 			if errors.Is(nerr, io.EOF) {
+				if !streamEnded {
+					return nil, fmt.Errorf("%w: stream EOF before ChunkEnd", ErrInvalidStream)
+				}
 				break
 			}
 			return nil, nerr
+		}
+		if streamEnded {
+			return nil, fmt.Errorf("%w: chunk %v received after ChunkEnd", ErrInvalidStream, chunk.Kind)
 		}
 		switch chunk.Kind {
 		case provider.ChunkText:
@@ -193,18 +200,22 @@ drain:
 			}
 		case provider.ChunkToolUseStart:
 			if chunk.ToolUse == nil {
-				return nil, fmt.Errorf("step.LLMCall: ChunkToolUseStart missing ToolUse payload")
+				return nil, fmt.Errorf("%w: ChunkToolUseStart missing ToolUse payload", ErrInvalidStream)
+			}
+			if _, dup := useIdx[chunk.ToolUse.CallID]; dup {
+				return nil, fmt.Errorf("%w: duplicate ChunkToolUseStart for CallID %q",
+					ErrInvalidStream, chunk.ToolUse.CallID)
 			}
 			pu := &pendingUse{CallID: chunk.ToolUse.CallID, Name: chunk.ToolUse.Name}
 			useIdx[chunk.ToolUse.CallID] = len(uses)
 			uses = append(uses, pu)
 		case provider.ChunkToolUseDelta:
 			if chunk.ToolUse == nil {
-				return nil, fmt.Errorf("step.LLMCall: ChunkToolUseDelta missing ToolUse payload")
+				return nil, fmt.Errorf("%w: ChunkToolUseDelta missing ToolUse payload", ErrInvalidStream)
 			}
 			idx, ok := useIdx[chunk.ToolUse.CallID]
 			if !ok {
-				return nil, fmt.Errorf("step.LLMCall: ChunkToolUseDelta for unknown CallID %q", chunk.ToolUse.CallID)
+				return nil, fmt.Errorf("%w: ChunkToolUseDelta for unknown CallID %q", ErrInvalidStream, chunk.ToolUse.CallID)
 			}
 			uses[idx].argsBuf.WriteString(chunk.ToolUse.ArgsDelta)
 		case provider.ChunkToolUseEnd:
@@ -259,7 +270,11 @@ drain:
 			stopReason = chunk.StopReason
 			rawRespHash = chunk.RawResponseHash
 			providerReqID = chunk.ProviderReqID
-			break drain
+			streamEnded = true
+			if c.requireRawResponseHash && len(rawRespHash) != event.HashSize {
+				return nil, fmt.Errorf("step.LLMCall: %w (provider %T emitted %d bytes, want %d)",
+					ErrMissingRawResponseHash, c.provider, len(rawRespHash), event.HashSize)
+			}
 		}
 	}
 
@@ -339,17 +354,19 @@ func hashRequest(req *provider.Request) ([]byte, error) {
 	return event.Hash(b), nil
 }
 
-// jsonToCanonicalCBOR routes arbitrary JSON bytes through a generic
-// interface into canonical CBOR. Lossy for numeric types (everything
-// becomes float64 or int64), which is acceptable here — the args are
-// going into the event log and back out as CBOR; callers of the tool
-// receive the original JSON bytes, not the re-encoded form.
+// jsonToCanonicalCBOR encodes a single JSON value as canonical CBOR.
+// Trailing tokens after the first value are rejected.
 func jsonToCanonicalCBOR(raw []byte) (cborenc.RawMessage, error) {
 	var v any
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber() // preserve int/float distinction where possible
+	dec.UseNumber()
 	if err := dec.Decode(&v); err != nil {
 		return nil, fmt.Errorf("decode json: %w", err)
+	}
+	if dec.More() {
+		var trailing json.RawMessage
+		_ = dec.Decode(&trailing)
+		return nil, fmt.Errorf("decode json: trailing data after first value: %q", string(trailing))
 	}
 	v = normalizeJSONNumbers(v)
 	return cborenc.Marshal(v)
@@ -411,3 +428,7 @@ func newULID() string {
 	defer ulidMu.Unlock()
 	return ulid.MustNew(ulid.Timestamp(time.Now()), cryptorand.Reader).String()
 }
+
+// NewCallID returns a fresh ULID for ToolCall.CallID. Use it when the
+// caller needs to know the ID before invoking CallTool.
+func NewCallID() string { return newULID() }

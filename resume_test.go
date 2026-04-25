@@ -302,6 +302,33 @@ func TestResume_PendingToolCallReissue(t *testing.T) {
 	if comp != 1 {
 		t.Fatalf("ToolCallCompleted count = %d, want 1 (reissue only)", comp)
 	}
+
+	// Reissued schedule must use a fresh CallID, and the matching
+	// Completed must reference it.
+	var orphanID, freshID, completedID string
+	for _, ev := range merged {
+		switch ev.Kind {
+		case event.KindToolCallScheduled:
+			s, _ := ev.AsToolCallScheduled()
+			if orphanID == "" {
+				orphanID = s.CallID
+			} else if freshID == "" {
+				freshID = s.CallID
+			}
+		case event.KindToolCallCompleted:
+			c, _ := ev.AsToolCallCompleted()
+			completedID = c.CallID
+		}
+	}
+	if orphanID == "" || freshID == "" {
+		t.Fatalf("expected orphan + fresh ToolCallScheduled, got orphan=%q fresh=%q", orphanID, freshID)
+	}
+	if orphanID == freshID {
+		t.Fatalf("reissue used orphan CallID %q; want a fresh one", orphanID)
+	}
+	if completedID != freshID {
+		t.Fatalf("ToolCallCompleted.CallID = %q, want fresh %q", completedID, freshID)
+	}
 }
 
 func TestResume_PendingToolCallRefuse(t *testing.T) {

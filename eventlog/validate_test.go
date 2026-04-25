@@ -73,6 +73,14 @@ func encodeAny(p any) (cborRaw, error) {
 		return event.EncodePayload(v)
 	case event.AssistantMessageCompleted:
 		return event.EncodePayload(v)
+	case event.ToolCallScheduled:
+		return event.EncodePayload(v)
+	case event.ToolCallCompleted:
+		return event.EncodePayload(v)
+	case event.ToolCallFailed:
+		return event.EncodePayload(v)
+	case event.BudgetExceeded:
+		return event.EncodePayload(v)
 	case event.RunCompleted:
 		return event.EncodePayload(v)
 	case event.RunFailed:
@@ -99,7 +107,7 @@ func goodRun(t *testing.T) []event.Event {
 		TurnID: "t1", InputTokens: 5,
 	})
 	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{
-		Text: "ok", InputTokens: 5, OutputTokens: 2,
+		TurnID: "t1", Text: "ok", InputTokens: 5, OutputTokens: 2,
 	})
 	return b.finish(t)
 }
@@ -191,6 +199,157 @@ func TestValidate_WrongMerkleRoot(t *testing.T) {
 	err := eventlog.Validate(evs)
 	if !errors.Is(err, eventlog.ErrLogCorrupt) {
 		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+// finishWith appends an arbitrary terminal payload with the correct
+// MerkleRoot computed over the events appended so far.
+func (b *runBuilder) finishWith(t *testing.T, kind event.Kind, payload any) []event.Event {
+	t.Helper()
+	leaves, err := merkle.EventHashes(b.evs)
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	root := merkle.Root(leaves)
+	switch p := payload.(type) {
+	case event.RunCompleted:
+		p.MerkleRoot = root
+		b.add(t, kind, p)
+	case event.RunFailed:
+		p.MerkleRoot = root
+		b.add(t, kind, p)
+	case event.RunCancelled:
+		p.MerkleRoot = root
+		b.add(t, kind, p)
+	default:
+		t.Fatalf("finishWith: unsupported terminal payload %T", payload)
+	}
+	return b.evs
+}
+
+func TestValidate_FirstEventNotRunStarted(t *testing.T) {
+	b := newBuilder("run-100")
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{TurnID: "t1"})
+	evs := b.finish(t)
+	err := eventlog.Validate(evs)
+	if !errors.Is(err, eventlog.ErrLogCorrupt) {
+		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+func TestValidate_UnsupportedSchemaVersion(t *testing.T) {
+	b := newBuilder("run-101")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: 99})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{TurnID: "t1"})
+	evs := b.finish(t)
+	err := eventlog.Validate(evs)
+	if !errors.Is(err, eventlog.ErrLogCorrupt) {
+		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+func TestValidate_TurnNotClosed(t *testing.T) {
+	b := newBuilder("run-102")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	// Open another turn without closing the first.
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t2"})
+	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{TurnID: "t2"})
+	evs := b.finish(t)
+	err := eventlog.Validate(evs)
+	if !errors.Is(err, eventlog.ErrLogCorrupt) {
+		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+func TestValidate_TurnIDMismatch(t *testing.T) {
+	b := newBuilder("run-103")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{TurnID: "wrong"})
+	evs := b.finish(t)
+	err := eventlog.Validate(evs)
+	if !errors.Is(err, eventlog.ErrLogCorrupt) {
+		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+func TestValidate_OpenTurnAtRunCompleted(t *testing.T) {
+	b := newBuilder("run-104")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	evs := b.finish(t) // RunCompleted with open turn
+	err := eventlog.Validate(evs)
+	if !errors.Is(err, eventlog.ErrLogCorrupt) {
+		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+func TestValidate_OpenTurnAtRunFailed_OK(t *testing.T) {
+	b := newBuilder("run-105")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	evs := b.finishWith(t, event.KindRunFailed, event.RunFailed{Error: "boom", ErrorType: "internal"})
+	if err := eventlog.Validate(evs); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidate_OrphanToolCompleted(t *testing.T) {
+	b := newBuilder("run-106")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{TurnID: "t1"})
+	b.add(t, event.KindToolCallCompleted, event.ToolCallCompleted{CallID: "c1", Attempt: 1})
+	evs := b.finish(t)
+	err := eventlog.Validate(evs)
+	if !errors.Is(err, eventlog.ErrLogCorrupt) {
+		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+func TestValidate_DuplicateToolOutcome(t *testing.T) {
+	b := newBuilder("run-107")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{TurnID: "t1"})
+	b.add(t, event.KindToolCallScheduled, event.ToolCallScheduled{CallID: "c1", TurnID: "t1", ToolName: "x", Attempt: 1})
+	b.add(t, event.KindToolCallCompleted, event.ToolCallCompleted{CallID: "c1", Attempt: 1})
+	b.add(t, event.KindToolCallCompleted, event.ToolCallCompleted{CallID: "c1", Attempt: 1})
+	evs := b.finish(t)
+	err := eventlog.Validate(evs)
+	if !errors.Is(err, eventlog.ErrLogCorrupt) {
+		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+func TestValidate_OpenToolAtRunCompleted(t *testing.T) {
+	b := newBuilder("run-108")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{TurnID: "t1"})
+	b.add(t, event.KindToolCallScheduled, event.ToolCallScheduled{CallID: "c1", TurnID: "t1", ToolName: "x", Attempt: 1})
+	evs := b.finish(t)
+	err := eventlog.Validate(evs)
+	if !errors.Is(err, eventlog.ErrLogCorrupt) {
+		t.Fatalf("err = %v, want ErrLogCorrupt", err)
+	}
+}
+
+func TestValidate_ToolRetrySharedCallID_OK(t *testing.T) {
+	b := newBuilder("run-109")
+	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
+	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
+	b.add(t, event.KindAssistantMessageCompleted, event.AssistantMessageCompleted{TurnID: "t1"})
+	b.add(t, event.KindToolCallScheduled, event.ToolCallScheduled{CallID: "c1", TurnID: "t1", ToolName: "x", Attempt: 1})
+	b.add(t, event.KindToolCallFailed, event.ToolCallFailed{CallID: "c1", Attempt: 1, ErrorType: "timeout", Error: "t/o"})
+	b.add(t, event.KindToolCallScheduled, event.ToolCallScheduled{CallID: "c1", TurnID: "t1", ToolName: "x", Attempt: 2})
+	b.add(t, event.KindToolCallCompleted, event.ToolCallCompleted{CallID: "c1", Attempt: 2})
+	evs := b.finish(t)
+	if err := eventlog.Validate(evs); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 

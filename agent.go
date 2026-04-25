@@ -112,13 +112,14 @@ func (a *Agent) runWithID(ctx context.Context, runID string, goal string) (*RunR
 	defer runSpan.End()
 
 	stepCfg := step.Config{
-		Log:      a.Log,
-		RunID:    runID,
-		Provider: a.Provider,
-		Tools:    step.NewRegistry(a.Tools...),
-		Budget:   budgetStepConfig(a.Budget),
-		Logger:   logger,
-		Metrics:  a.Metrics.stepSink(),
+		Log:                    a.Log,
+		RunID:                  runID,
+		Provider:               a.Provider,
+		Tools:                  step.NewRegistry(a.Tools...),
+		Budget:                 budgetStepConfig(a.Budget),
+		Logger:                 logger,
+		Metrics:                a.Metrics.stepSink(),
+		RequireRawResponseHash: a.Config.RequireRawResponseHash,
 	}
 	if len(a.replayRecorded) > 0 {
 		stepCfg.Mode = step.ModeReplay

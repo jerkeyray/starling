@@ -122,14 +122,15 @@ func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts
 		return nil, fmt.Errorf("starling: Resume: hash tail event: %w", err)
 	}
 	stepCfg := step.Config{
-		Log:                a.Log,
-		RunID:              runID,
-		Provider:           a.Provider,
-		Tools:              step.NewRegistry(a.Tools...),
-		Budget:             budgetStepConfig(a.Budget),
-		Logger:             logger,
-		ResumeFromSeq:      last.Seq,
-		ResumeFromPrevHash: event.Hash(lastEnc),
+		Log:                    a.Log,
+		RunID:                  runID,
+		Provider:               a.Provider,
+		Tools:                  step.NewRegistry(a.Tools...),
+		Budget:                 budgetStepConfig(a.Budget),
+		Logger:                 logger,
+		ResumeFromSeq:          last.Seq,
+		ResumeFromPrevHash:     event.Hash(lastEnc),
+		RequireRawResponseHash: a.Config.RequireRawResponseHash,
 	}
 	stepCtx, err := step.NewContext(stepCfg)
 	if err != nil {
@@ -175,13 +176,21 @@ func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts
 		})
 	}
 
-	// 8. Re-issue pending tool calls. Each uses a fresh CallID (step
-	// mints one when ToolCall.CallID is empty); results are appended to
-	// msgs so the upcoming LLMCall sees the completed tool turn.
+	// 8. Re-issue pending tool calls. Mint fresh CallIDs and rewrite
+	// the orphan IDs in the replayed assistant message so the provider
+	// sees one consistent set of IDs across tool_use and tool_result.
 	if len(state.PendingCalls) > 0 {
+		idMap := make(map[string]string, len(state.PendingCalls))
+		for i, pc := range state.PendingCalls {
+			fresh := step.NewCallID()
+			idMap[pc.CallID] = fresh
+			state.PendingCalls[i].CallID = fresh
+		}
+		rewriteAssistantToolUseIDs(state.Msgs, idMap)
+
 		for _, pc := range state.PendingCalls {
 			result, cerr := step.CallTool(ctx, step.ToolCall{
-				// CallID left empty → step mints a fresh one.
+				CallID: pc.CallID,
 				TurnID: state.LastTurnID,
 				Name:   pc.Name,
 				Args:   pc.Args,
@@ -201,7 +210,7 @@ func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts
 			state.Msgs = append(state.Msgs, provider.Message{
 				Role: provider.RoleTool,
 				ToolResult: &provider.ToolResult{
-					CallID:  pc.CallID, // link the tool-result message back to the orphan for the provider
+					CallID:  pc.CallID,
 					Content: string(result),
 				},
 			})
@@ -456,6 +465,25 @@ func reconstructState(events []event.Event) (*resumeState, error) {
 		state.PendingCalls = append(state.PendingCalls, pendingByID[id])
 	}
 	return state, nil
+}
+
+// rewriteAssistantToolUseIDs rewrites ToolUse.CallID values in the most
+// recent assistant message of msgs using idMap.
+func rewriteAssistantToolUseIDs(msgs []provider.Message, idMap map[string]string) {
+	if len(idMap) == 0 {
+		return
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != provider.RoleAssistant {
+			continue
+		}
+		for j := range msgs[i].ToolUses {
+			if fresh, ok := idMap[msgs[i].ToolUses[j].CallID]; ok {
+				msgs[i].ToolUses[j].CallID = fresh
+			}
+		}
+		return
+	}
 }
 
 // cborToJSON decodes canonical CBOR into a generic value and re-marshals

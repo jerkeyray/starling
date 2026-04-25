@@ -40,6 +40,8 @@ type Context struct {
 	// Caps concurrent tool execution; 0 → DefaultMaxParallelTools.
 	maxParallelTools int
 
+	requireRawResponseHash bool
+
 	// Never nil — NewContext substitutes a discard logger.
 	logger *slog.Logger
 
@@ -84,19 +86,20 @@ func NewContext(cfg Config) (*Context, error) {
 		prevHash = append(prevHash, cfg.ResumeFromPrevHash...)
 	}
 	return &Context{
-		log:              cfg.Log,
-		runID:            cfg.RunID,
-		provider:         cfg.Provider,
-		tools:            cfg.Tools,
-		budget:           cfg.Budget,
-		mode:             cfg.Mode,
-		recorded:         cfg.Recorded,
-		clockFn:          clockFn,
-		maxParallelTools: cfg.MaxParallelTools,
-		logger:           logger,
-		metrics:          cfg.Metrics,
-		nextSeq:          nextSeq,
-		prevHash:         prevHash,
+		log:                    cfg.Log,
+		runID:                  cfg.RunID,
+		provider:               cfg.Provider,
+		tools:                  cfg.Tools,
+		budget:                 cfg.Budget,
+		mode:                   cfg.Mode,
+		recorded:               cfg.Recorded,
+		clockFn:                clockFn,
+		maxParallelTools:       cfg.MaxParallelTools,
+		requireRawResponseHash: cfg.RequireRawResponseHash,
+		logger:                 logger,
+		metrics:                cfg.Metrics,
+		nextSeq:                nextSeq,
+		prevHash:               prevHash,
 	}, nil
 }
 

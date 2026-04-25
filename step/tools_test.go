@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -636,4 +637,22 @@ func TestCallTool_PanicsWithoutContext(t *testing.T) {
 		}
 	}()
 	_, _ = step.CallTool(context.Background(), step.ToolCall{Name: "x"})
+}
+
+func TestCallTool_RejectsTrailingJSON(t *testing.T) {
+	reg := step.NewRegistry(echoTool())
+	ctx, _ := newToolsCtx(t, reg)
+
+	// `{"msg":"hi"}{"msg":"hi"}` is two concatenated JSON values; the
+	// stricter decoder must reject the second.
+	args := json.RawMessage(`{"msg":"hi"}{"msg":"x"}`)
+	_, err := step.CallTool(ctx, step.ToolCall{
+		CallID: "c1", TurnID: "t1", Name: "echo", Args: args,
+	})
+	if err == nil {
+		t.Fatalf("CallTool with trailing JSON accepted; want error")
+	}
+	if !strings.Contains(err.Error(), "trailing data") {
+		t.Fatalf("err = %v, want \"trailing data\" diagnostic", err)
+	}
 }

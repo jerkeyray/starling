@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/jerkeyray/starling/eventlog"
@@ -175,5 +176,72 @@ func TestSQLite_ReadOnly_RejectsAppend(t *testing.T) {
 	err = ro.Append(context.Background(), "r1", cb.next(t, "r1", "should-fail"))
 	if !errors.Is(err, eventlog.ErrReadOnly) {
 		t.Fatalf("Append (ro): err = %v, want ErrReadOnly", err)
+	}
+}
+
+// TestSQLite_ConcurrentAppendSerializes asserts that two appenders
+// racing on the same tail cannot both succeed and that the loser fails
+// with ErrInvalidAppend, not a raw PRIMARY KEY violation.
+func TestSQLite_ConcurrentAppendSerializes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.db")
+	log, err := eventlog.NewSQLite(path)
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+
+	// Seed one event so both contenders observe the same tail.
+	seed := &chainBuilder{}
+	if err := log.Append(context.Background(), "r1", seed.next(t, "r1", "seed")); err != nil {
+		t.Fatalf("seed Append: %v", err)
+	}
+
+	// Two independent chainBuilders, each starting from the seed tail,
+	// each minting their own seq=2 event. Only one INSERT can win.
+	mkContender := func() func() error {
+		cb := &chainBuilder{seq: seed.seq, prevHash: seed.prevHash}
+		ev := cb.next(t, "r1", "race")
+		return func() error { return log.Append(context.Background(), "r1", ev) }
+	}
+	a, b := mkContender(), mkContender()
+
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		errs      []error
+		successes int
+	)
+	run := func(fn func() error) {
+		defer wg.Done()
+		err := fn()
+		mu.Lock()
+		defer mu.Unlock()
+		if err == nil {
+			successes++
+			return
+		}
+		errs = append(errs, err)
+	}
+	wg.Add(2)
+	go run(a)
+	go run(b)
+	wg.Wait()
+
+	if successes != 1 {
+		t.Fatalf("successes = %d, want exactly 1 (errs=%v)", successes, errs)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("errs = %v, want exactly one error", errs)
+	}
+	if !errors.Is(errs[0], eventlog.ErrInvalidAppend) {
+		t.Fatalf("losing append err = %v, want ErrInvalidAppend", errs[0])
+	}
+
+	got, err := log.Read(context.Background(), "r1")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2 (seed + one winner)", len(got))
 	}
 }
