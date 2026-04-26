@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 
 	starling "github.com/jerkeyray/starling"
-	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/replay"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -79,7 +79,7 @@ func runOnce(_ []string) error {
 	if err != nil {
 		return err
 	}
-	defer a.Log.(interface{ Close() error }).Close()
+	defer a.Log.Close()
 
 	res, runErr := a.Run(ctx, "checkout-api error_rate spiked at 14:00 UTC; triage and escalate if necessary.")
 	if res != nil {
@@ -149,7 +149,7 @@ func runResume(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer a.Log.(interface{ Close() error }).Close()
+	defer a.Log.Close()
 
 	res, err := a.Resume(context.Background(), runID, "")
 	if err != nil {
@@ -188,13 +188,9 @@ func maybeServeMetrics(reg prometheus.Gatherer) func() {
 	mux.Handle("/metrics", starling.MetricsHandler(reg))
 	srv := &http.Server{Addr: addr, Handler: mux}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintln(os.Stderr, "metrics server:", err)
 		}
 	}()
 	return func() { _ = srv.Shutdown(context.Background()) }
 }
-
-// silence unused-import linter when only the type assertion in
-// runResume references eventlog.
-var _ = eventlog.NewInMemory

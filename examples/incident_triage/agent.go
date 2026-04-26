@@ -21,7 +21,6 @@ import (
 
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/budget"
-	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
 	"github.com/jerkeyray/starling/step"
@@ -202,7 +201,7 @@ func scriptedTriage() [][]provider.StreamChunk {
 	// must too or the assistant's recorded tool-use args won't
 	// byte-match the replay reconstruction.
 	mkArgs := func(v any) string {
-		b, _ := json.Marshal(toSortedMap(v))
+		b, _ := json.Marshal(sortedMap(v))
 		return string(b)
 	}
 	return [][]provider.StreamChunk{
@@ -259,17 +258,16 @@ func buildAgent(_ context.Context, opts buildOpts) (*starling.Agent, error) {
 	}
 
 	cfg := starling.Config{
-		Model:                  model,
-		MaxTurns:               6,
-		AppVersion:             os.Getenv("APP_VERSION"),
-		RequireRawResponseHash: false,
-		Logger:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Model:      model,
+		MaxTurns:   6,
+		AppVersion: os.Getenv("APP_VERSION"),
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if os.Getenv("DEBUG") == "1" {
 		cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 
-	a := &starling.Agent{
+	return &starling.Agent{
 		Provider: prov,
 		Tools: []tool.Tool{
 			metricLookupTool(),
@@ -279,16 +277,13 @@ func buildAgent(_ context.Context, opts buildOpts) (*starling.Agent, error) {
 		Log:       log,
 		Config:    cfg,
 		Namespace: namespace,
+		Metrics:   opts.metrics,
 		Budget: &budget.Budget{
 			MaxOutputTokens: 4_000,
 			MaxUSD:          0.25,
 			MaxWallClock:    2 * time.Minute,
 		},
-	}
-	if opts.metrics != nil {
-		a.Metrics = opts.metrics
-	}
-	return a, nil
+	}, nil
 }
 
 // pickProvider returns a canned provider when forced or when no API
@@ -319,21 +314,11 @@ func openLog(path string) (eventlog.EventLog, error) {
 	return eventlog.NewSQLite(path)
 }
 
-// ----------------------------------------------------------------------
-// canned-mode validation aid
-// ----------------------------------------------------------------------
-
-// summarizeRun is a tiny helper used by run-mode and the smoke test
-// to print a one-line status after the agent finishes.
 func summarizeRun(res *starling.RunResult) string {
-	if res == nil {
-		return "no result"
-	}
 	return fmt.Sprintf("run=%s terminal=%s turns=%d cost=$%.4f",
 		res.RunID, res.TerminalKind, res.TurnCount, res.TotalCostUSD)
 }
 
-// loadValidate is a small helper exposed for the smoke test.
 func loadValidate(log eventlog.EventLog, runID string) error {
 	evs, err := log.Read(context.Background(), runID)
 	if err != nil {
@@ -342,21 +327,10 @@ func loadValidate(log eventlog.EventLog, runID string) error {
 	return eventlog.Validate(evs)
 }
 
-// firstRunStarted returns the seq of the RunStarted event, used in
-// tests to assert event ordering deterministically.
-func firstRunStarted(events []event.Event) (uint64, bool) {
-	for _, ev := range events {
-		if ev.Kind == event.KindRunStarted {
-			return ev.Seq, true
-		}
-	}
-	return 0, false
-}
-
-// toSortedMap round-trips v through JSON into a map[string]any. The
-// resulting map marshals back to JSON with alphabetical keys, which
-// matches the cbor→map→json reconstruction the replay provider uses.
-func toSortedMap(v any) map[string]any {
+// sortedMap round-trips v through JSON into a map[string]any so a
+// later json.Marshal emits keys alphabetically. Matches the
+// cbor→map→json round-trip the replay provider performs.
+func sortedMap(v any) map[string]any {
 	b, _ := json.Marshal(v)
 	var out map[string]any
 	_ = json.Unmarshal(b, &out)

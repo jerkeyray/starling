@@ -28,6 +28,11 @@ import (
 	"github.com/jerkeyray/starling/step"
 )
 
+// ErrNonDeterminism is returned by Verify when the re-executed run
+// diverges from the recording. Callers route on it with errors.Is.
+// The root starling package re-exports this as starling.ErrNonDeterminism.
+var ErrNonDeterminism = errors.New("replay: non-determinism detected")
+
 // Divergence is a structured view of a replay mismatch. Callers extract
 // it from a Verify error with errors.As.
 type Divergence struct {
@@ -55,8 +60,8 @@ func (d *Divergence) LogAttrs() []slog.Attr {
 	}
 }
 
-// asDivergence extracts a *step.MismatchError from err and lifts it
-// into a *Divergence stamped with runID. Returns nil if err is not a
+// asDivergence lifts a *step.MismatchError out of err into a
+// *Divergence stamped with runID. Returns nil when err is not a
 // mismatch.
 func asDivergence(runID string, err error) *Divergence {
 	var m *step.MismatchError
@@ -72,11 +77,6 @@ func asDivergence(runID string, err error) *Divergence {
 		Reason:       m.Reason,
 	}
 }
-
-// ErrNonDeterminism is returned by Verify when the re-executed run
-// diverges from the recording. Callers route on it with errors.Is.
-// The root starling package re-exports this as starling.ErrNonDeterminism.
-var ErrNonDeterminism = errors.New("replay: non-determinism detected")
 
 // Agent is the subset of *starling.Agent fields Verify needs. The
 // root starling package calls Verify with a concrete *Agent via its

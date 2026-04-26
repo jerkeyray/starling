@@ -65,8 +65,8 @@ func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("eventlog/sqlite: open: %w", err)
 	}
-	// A single writer keeps BEGIN IMMEDIATE simple; readers come in on
-	// separate connections from the driver pool.
+	// Cap pool size so contended writers serialize quickly under the
+	// busy-timeout instead of fanning out across many connections.
 	db.SetMaxOpenConns(8)
 	if !cfg.readOnly {
 		if err := initSQLite(db); err != nil {
@@ -83,8 +83,6 @@ func NewSQLite(path string, opts ...SQLiteOption) (EventLog, error) {
 	}
 	return log, nil
 }
-
-func timeNowUnixNano() int64 { return time.Now().UnixNano() }
 
 func initSQLite(db *sql.DB) error {
 	pragmas := []string{
@@ -200,7 +198,7 @@ func (s *sqliteLog) migrate(ctx context.Context, dryRun bool) (MigrationReport, 
 func sqliteRecordVersion(ctx context.Context, tx *sql.Tx, version int) error {
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO `+metaTable+` (version, applied_at) VALUES (?, ?)`,
-		version, timeNowUnixNano(),
+		version, time.Now().UnixNano(),
 	)
 	return err
 }

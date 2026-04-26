@@ -394,30 +394,20 @@ func (a *Agent) emitRunStarted(ctx context.Context, sc *step.Context, goal strin
 	})
 }
 
-// starlingVersion returns the linked starling module version (e.g.
-// "v0.3.1"), or "(devel)" when the build info doesn't carry one.
-// Cached after first read; safe for concurrent use.
-var (
-	starlingVersionOnce sync.Once
-	starlingVersionStr  string
-)
-
-func starlingVersion() string {
-	starlingVersionOnce.Do(func() {
-		info, ok := debug.ReadBuildInfo()
-		if !ok {
-			return
+// starlingVersion returns the linked starling module version, or ""
+// when the build info doesn't carry one. Cached after first read.
+var starlingVersion = sync.OnceValue(func() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, m := range info.Deps {
+		if m.Path == "github.com/jerkeyray/starling" {
+			return m.Version
 		}
-		for _, m := range info.Deps {
-			if m.Path == "github.com/jerkeyray/starling" {
-				starlingVersionStr = m.Version
-				return
-			}
-		}
-		starlingVersionStr = info.Main.Version
-	})
-	return starlingVersionStr
-}
+	}
+	return info.Main.Version
+})
 
 // emitTerminal picks the right terminal event kind from runErr,
 // computes the Merkle root over every event already in the log (which

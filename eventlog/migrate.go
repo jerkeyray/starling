@@ -8,20 +8,18 @@ import (
 )
 
 // metaTable is the per-database table that records which migrations
-// have been applied. Both backends use the same name so dump/restore
+// have been applied. Both backends share the name so dump/restore
 // across backends is straightforward.
 const metaTable = "eventlog_schema_migrations"
 
-// latestVersion returns the highest migration version in steps.
-func latestVersion(steps []migration) int {
-	max := 0
-	for _, s := range steps {
-		if s.version > max {
-			max = s.version
-		}
-	}
-	return max
-}
+// ErrSchemaTooNew is returned when the database reports a schema
+// version higher than this binary's latest migration.
+var ErrSchemaTooNew = errors.New("eventlog: database schema is newer than this binary")
+
+// ErrSchemaOutdated is returned by Preflight when the database is at a
+// lower schema version than the running binary expects. Run `starling
+// migrate <db>` to remediate.
+var ErrSchemaOutdated = errors.New("eventlog: database schema is older than this binary; run migrate")
 
 // MigrationReport describes what Migrate did (or, with WithDryRun,
 // would have done).
@@ -46,24 +44,30 @@ func WithDryRun() MigrateOption {
 	return func(c *migrateConfig) { c.dryRun = true }
 }
 
-// ErrSchemaTooNew is returned when the database reports a schema
-// version higher than this binary's latest migration — a downgrade
-// scenario the runtime refuses to operate against.
-var ErrSchemaTooNew = errors.New("eventlog: database schema is newer than this binary")
-
-// migrater is the internal interface a concrete backend implements so
-// the public Migrate / SchemaVersion functions can dispatch without
-// widening the EventLog interface.
-type migrater interface {
-	currentVersion(ctx context.Context) (int, error)
-	migrate(ctx context.Context, dryRun bool) (MigrationReport, error)
-	expectedVersion() int
+// SchemaVersion returns the highest migration version recorded in the
+// database backing log. A fresh database that was never migrated
+// returns 0.
+func SchemaVersion(ctx context.Context, log EventLog) (int, error) {
+	m, ok := log.(migrater)
+	if !ok {
+		return 0, errNoMigrations(log)
+	}
+	return m.currentVersion(ctx)
 }
 
-// ErrSchemaOutdated is returned by Preflight when the database is at a
-// lower schema version than the running binary expects. Run `starling
-// migrate <db>` to remediate.
-var ErrSchemaOutdated = errors.New("eventlog: database schema is older than this binary; run migrate")
+// Migrate brings the database backing log up to the latest version
+// known to this binary. Forward-only. Idempotent.
+func Migrate(ctx context.Context, log EventLog, opts ...MigrateOption) (MigrationReport, error) {
+	cfg := migrateConfig{}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	m, ok := log.(migrater)
+	if !ok {
+		return MigrationReport{}, errNoMigrations(log)
+	}
+	return m.migrate(ctx, cfg.dryRun)
+}
 
 // Preflight verifies the database backing log is at the latest schema
 // version the running binary expects. Logs that don't track schema
@@ -88,43 +92,43 @@ func Preflight(ctx context.Context, log EventLog) error {
 	return nil
 }
 
-// SchemaVersion returns the highest migration version recorded in the
-// database backing log. A fresh database that was never migrated
-// returns 0.
-func SchemaVersion(ctx context.Context, log EventLog) (int, error) {
-	m, ok := log.(migrater)
-	if !ok {
-		return 0, fmt.Errorf("eventlog: log %T does not support migrations", log)
-	}
-	return m.currentVersion(ctx)
+// migrater is the internal interface a concrete backend implements so
+// SchemaVersion / Migrate / Preflight can dispatch without widening
+// the EventLog interface.
+type migrater interface {
+	currentVersion(ctx context.Context) (int, error)
+	migrate(ctx context.Context, dryRun bool) (MigrationReport, error)
+	expectedVersion() int
 }
 
-// Migrate brings the database backing log up to the latest version
-// known to this binary. Forward-only. Idempotent.
-func Migrate(ctx context.Context, log EventLog, opts ...MigrateOption) (MigrationReport, error) {
-	cfg := migrateConfig{}
-	for _, o := range opts {
-		o(&cfg)
-	}
-	m, ok := log.(migrater)
-	if !ok {
-		return MigrationReport{}, fmt.Errorf("eventlog: log %T does not support migrations", log)
-	}
-	return m.migrate(ctx, cfg.dryRun)
+func errNoMigrations(log EventLog) error {
+	return fmt.Errorf("eventlog: log %T does not support migrations", log)
 }
 
 // migration is one forward-only step. Each backend supplies its own
-// SQL because table-creation syntax differs (BLOB vs BYTEA, AUTOINCREMENT, etc).
-// stmts run in order; apply, when set, runs in addition for migrations
-// that need procedural logic (e.g. conditional rename).
+// SQL because table-creation syntax differs (BLOB vs BYTEA, AUTOINCREMENT, …).
+// stmts run in order; apply, when set, runs after for migrations that
+// need procedural logic (e.g. conditional rename).
 type migration struct {
 	version int
 	stmts   []string
 	apply   func(ctx context.Context, tx *sql.Tx) error
 }
 
-// applyMigrations runs each migration step inside its own transaction,
-// recording success in metaTable via recordVersion. Stops at the first failure.
+// latestVersion returns the highest migration version in steps.
+func latestVersion(steps []migration) int {
+	highest := 0
+	for _, s := range steps {
+		if s.version > highest {
+			highest = s.version
+		}
+	}
+	return highest
+}
+
+// applyMigrations runs each pending migration step inside its own
+// transaction, recording success via recordVersion. Stops at the
+// first failure.
 func applyMigrations(
 	ctx context.Context,
 	db *sql.DB,
