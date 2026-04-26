@@ -74,6 +74,11 @@ Everything else on the `Agent` must match the original run:
   the same names, returning the same JSON for the same inputs.
   Adding, removing, or renaming tools between record and replay
   causes drift.
+- **MCP tools** — `tool/mcp` tools are still external tools. Replay
+  calls the MCP server again and compares the returned JSON with the
+  recording. Keep the same server reachable, or wrap the remote effect
+  behind your own deterministic tool if you need portable replay from
+  a log alone.
 - **Model** — `Config.Model` must match. The replay provider honors
   the name from the recording.
 - **System prompt** — `Config.SystemPrompt` must match byte-for-byte.

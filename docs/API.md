@@ -28,6 +28,7 @@ page does not re-list every field.
 | `starling/provider/openrouter`     | OpenRouter adapter (thin wrapper over `provider/openai`)         |
 | `starling/tool`                    | `Tool` interface, `Typed[In,Out]` reflective helper              |
 | `starling/tool/builtin`            | Small demo tool set (`Fetch`, `ReadFile`)                        |
+| `starling/tool/mcp`                | MCP client adapter that exposes remote MCP tools as `tool.Tool`   |
 | `starling/step`                    | Determinism-enforcing primitives: `LLMCall`, `CallTool`, etc.    |
 | `starling/replay`                  | Replay-factory plumbing and side-by-side stream                  |
 | `starling/inspect`                 | Local HTTP inspector (`http.Handler`)                            |

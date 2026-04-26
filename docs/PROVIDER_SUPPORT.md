@@ -20,7 +20,7 @@ but Starling hasn't wired it yet.
 | Feature                          | OpenAI                          | Anthropic                                | Notes |
 |----------------------------------|---------------------------------|------------------------------------------|-------|
 | Streaming responses              | ✅                              | ✅                                       | SSE under the hood for both. |
-| Tool calls (custom)              | ✅                              | ✅                                       | JSON-schema–typed `tool.Tool` round-trips to both shapes. |
+| Tool calls (custom)              | ✅                              | ✅                                       | JSON-schema–typed `tool.Tool` round-trips to all providers. MCP server tools can be adapted via `tool/mcp`. |
 | Reasoning / thinking text        | ✅ (reasoning summaries)        | ✅ (extended thinking `thinking_delta`)  | Emitted as `ReasoningEmitted` with `Sensitive=true`. |
 | Thinking signature               | n/a                             | ✅                                       | `ReasoningEmitted.Signature` round-trips verbatim so replay is byte-faithful. |
 | Redacted thinking                | n/a                             | ✅                                       | `ReasoningEmitted{Redacted: true}` carries opaque payload + signature. |
@@ -43,7 +43,7 @@ but Starling hasn't wired it yet.
 | Citations (`citations_delta`)           | Deferred — five citation-location variants deserve a unified cross-provider abstraction. |
 | Structured outputs (`response_format` / `output_config.json_schema`) | Deferred — design a unified shape once both sides have shipped it stably. |
 | `service_tier`, `inference_geo`, `container`, `metadata.user_id` | Route through `Request.Params` CBOR escape hatch today; promote to first-class fields if broadly adopted. |
-| MCP connectors                          | Deferred — adapter from MCP tools into `tool.Tool` is on the roadmap (W-series P2). |
+| MCP resources / prompts / sampling      | Deferred — `tool/mcp` intentionally adapts MCP tools only. |
 
 ## Pricing
 

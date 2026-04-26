@@ -154,6 +154,38 @@ prov, _ := anthropic.New(anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
 See [`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md) for the
 full feature matrix across both providers.
 
+## MCP tools
+
+MCP server tools can be mounted as ordinary Starling tools. The adapter
+supports stdio command servers and streamable HTTP endpoints; the core
+agent runtime stays MCP-agnostic.
+
+```go
+import toolmcp "github.com/jerkeyray/starling/tool/mcp"
+
+mcpClient, err := toolmcp.NewHTTP(ctx, "http://localhost:3000/mcp", nil,
+	toolmcp.WithToolNamePrefix("mcp_"),
+	toolmcp.WithCallTimeout(10*time.Second),
+)
+if err != nil { panic(err) }
+defer mcpClient.Close()
+
+mcpTools, err := mcpClient.Tools(ctx)
+if err != nil { panic(err) }
+
+a := &starling.Agent{
+	Provider: prov,
+	Tools:    append(localTools, mcpTools...),
+	Log:      log,
+	Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 8},
+}
+```
+
+MCP tools replay like any other external `tool.Tool`: replay re-runs
+the tool call and checks the result against the recorded
+`ToolCallCompleted` payload. The same MCP server must be reachable
+and deterministic for clean replay.
+
 ## Budgets
 
 Set any combination of the four budget axes on `Agent.Budget`. Zero

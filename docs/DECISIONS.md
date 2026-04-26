@@ -142,9 +142,11 @@ A generic helper `tool.Typed[In, Out](name, desc, fn)` wraps this for users who 
 
 > **Update (2026-04):** MCP integration is descoped to an *adapter* —
 > map MCP server tools onto `tool.Tool` — rather than a "native"
-> integration. The core agent runtime stays MCP-agnostic; an external
-> `provider/mcp` package will translate. Shipped after the production-ops
-> workstream (see W-series P2 in the implementation plan).
+> integration. The core agent runtime stays MCP-agnostic; `tool/mcp`
+> translates MCP server tools into ordinary Starling tools. The first
+> shipped version supports stdio command servers, streamable HTTP endpoints,
+> include/exclude filters, per-call timeout, and output size limits. MCP
+> resources, prompts, sampling, elicitation, and logging remain out of scope.
 
 ---
 
