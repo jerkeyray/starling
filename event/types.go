@@ -53,6 +53,12 @@ type RunStarted struct {
 	ToolRegistryHash []byte             `cbor:"tool_registry_hash" json:"tool_registry_hash"`
 	ToolSchemas      []ToolSchemaRef    `cbor:"tool_schemas" json:"tool_schemas"`
 	Budget           *BudgetLimits      `cbor:"budget,omitempty" json:"budget,omitempty"`
+	// StarlingVersion is the runtime library version that recorded the
+	// run. Comes from the linked starling module; empty when the build
+	// info is unavailable.
+	StarlingVersion string `cbor:"starling_version,omitempty" json:"starling_version,omitempty"`
+	// AppVersion is a caller-supplied application version (Config.AppVersion).
+	AppVersion string `cbor:"app_version,omitempty" json:"app_version,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

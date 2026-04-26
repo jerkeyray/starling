@@ -2,6 +2,7 @@ package starling
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/jerkeyray/starling/budget"
 	"github.com/jerkeyray/starling/internal/cborenc"
@@ -31,6 +32,17 @@ type Config struct {
 	// RequireRawResponseHash fails any turn whose ChunkEnd lacks a
 	// 32-byte hash.
 	RequireRawResponseHash bool
+
+	// AppVersion identifies the caller's application build and is
+	// stamped into RunStarted alongside the Starling library version.
+	// Optional; left blank when unset.
+	AppVersion string
+
+	// EmitTimeout bounds each event-log Append the agent issues under
+	// context.WithoutCancel (terminal events, tool failures during
+	// cancellation). Zero disables the bound; set this when a hung
+	// backend must not block shutdown.
+	EmitTimeout time.Duration
 
 	// SkipSchemaCheck disables the pre-flight schema-version check that
 	// Run, Resume, and Replay run against the event log. Reserved for

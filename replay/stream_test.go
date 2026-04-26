@@ -307,3 +307,35 @@ func TestStream_FactoryReturnsNonStreamingAgent_ReturnsError(t *testing.T) {
 type bareAgent struct{}
 
 func (bareAgent) RunReplay(_ context.Context, _ []event.Event) error { return nil }
+
+func TestStream_DivergenceCarriesStructuredFields(t *testing.T) {
+	log := eventlog.NewInMemory()
+	defer log.Close()
+	seedRun(t, log, "r-struct")
+
+	mismatchErr := &step.MismatchError{
+		Seq:          2,
+		Kind:         event.KindTurnStarted,
+		ExpectedKind: event.KindRunStarted,
+		Class:        step.MismatchKind,
+		Reason:       "seq=2 expected kind RunStarted, got TurnStarted",
+	}
+	ch, err := Stream(context.Background(), factoryReturning(&fakeAgent{emitN: 1, finalErr: mismatchErr}), log, "r-struct")
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	got := drainSteps(t, ch)
+	final := got[len(got)-1]
+	if final.Divergence == nil {
+		t.Fatalf("final.Divergence is nil; want populated structured form")
+	}
+	if final.Divergence.Class != step.MismatchKind {
+		t.Errorf("Divergence.Class = %s, want %s", final.Divergence.Class, step.MismatchKind)
+	}
+	if final.Divergence.Seq != 2 {
+		t.Errorf("Divergence.Seq = %d, want 2", final.Divergence.Seq)
+	}
+	if final.Divergence.RunID != "r-struct" {
+		t.Errorf("Divergence.RunID = %q, want r-struct", final.Divergence.RunID)
+	}
+}

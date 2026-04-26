@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -125,6 +126,7 @@ func (a *Agent) runWithID(ctx context.Context, runID string, goal string) (*RunR
 		Logger:                 logger,
 		Metrics:                a.Metrics.stepSink(),
 		RequireRawResponseHash: a.Config.RequireRawResponseHash,
+		EmitTimeout:            a.Config.EmitTimeout,
 	}
 	if len(a.replayRecorded) > 0 {
 		stepCfg.Mode = step.ModeReplay
@@ -387,7 +389,34 @@ func (a *Agent) emitRunStarted(ctx context.Context, sc *step.Context, goal strin
 		ToolRegistryHash: registryHash,
 		ToolSchemas:      schemas,
 		Budget:           budgetLimits(a.Budget),
+		StarlingVersion:  starlingVersion(),
+		AppVersion:       a.Config.AppVersion,
 	})
+}
+
+// starlingVersion returns the linked starling module version (e.g.
+// "v0.3.1"), or "(devel)" when the build info doesn't carry one.
+// Cached after first read; safe for concurrent use.
+var (
+	starlingVersionOnce sync.Once
+	starlingVersionStr  string
+)
+
+func starlingVersion() string {
+	starlingVersionOnce.Do(func() {
+		info, ok := debug.ReadBuildInfo()
+		if !ok {
+			return
+		}
+		for _, m := range info.Deps {
+			if m.Path == "github.com/jerkeyray/starling" {
+				starlingVersionStr = m.Version
+				return
+			}
+		}
+		starlingVersionStr = info.Main.Version
+	})
+	return starlingVersionStr
 }
 
 // emitTerminal picks the right terminal event kind from runErr,

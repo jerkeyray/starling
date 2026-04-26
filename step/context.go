@@ -41,6 +41,7 @@ type Context struct {
 	maxParallelTools int
 
 	requireRawResponseHash bool
+	emitTimeout            time.Duration
 
 	// Never nil — NewContext substitutes a discard logger.
 	logger *slog.Logger
@@ -96,6 +97,7 @@ func NewContext(cfg Config) (*Context, error) {
 		clockFn:                clockFn,
 		maxParallelTools:       cfg.MaxParallelTools,
 		requireRawResponseHash: cfg.RequireRawResponseHash,
+		emitTimeout:            cfg.EmitTimeout,
 		logger:                 logger,
 		metrics:                cfg.Metrics,
 		nextSeq:                nextSeq,
@@ -158,14 +160,31 @@ func emit[T any](ctx context.Context, c *Context, kind event.Kind, payload T) er
 	if c.mode == ModeReplay {
 		idx := int(c.nextSeq - 1)
 		if idx >= len(c.recorded) {
-			return fmt.Errorf("%w: replay stream exhausted at seq=%d (kind=%s)", ErrReplayMismatch, c.nextSeq, kind)
+			return &MismatchError{
+				Seq:    c.nextSeq,
+				Kind:   kind,
+				Class:  MismatchExhausted,
+				Reason: fmt.Sprintf("replay stream exhausted at seq=%d (kind=%s)", c.nextSeq, kind),
+			}
 		}
 		rec := c.recorded[idx]
 		if rec.Kind != kind {
-			return fmt.Errorf("%w: seq=%d expected kind %s, got %s", ErrReplayMismatch, c.nextSeq, rec.Kind, kind)
+			return &MismatchError{
+				Seq:          c.nextSeq,
+				Kind:         kind,
+				ExpectedKind: rec.Kind,
+				Class:        MismatchKind,
+				Reason:       fmt.Sprintf("seq=%d expected kind %s, got %s", c.nextSeq, rec.Kind, kind),
+			}
 		}
 		if !bytesEqual(rec.Payload, encoded) {
-			return fmt.Errorf("%w: seq=%d payload mismatch (kind=%s)", ErrReplayMismatch, c.nextSeq, kind)
+			return &MismatchError{
+				Seq:          c.nextSeq,
+				Kind:         kind,
+				ExpectedKind: rec.Kind,
+				Class:        MismatchPayload,
+				Reason:       fmt.Sprintf("seq=%d payload mismatch (kind=%s)", c.nextSeq, kind),
+			}
 		}
 		ts = rec.Timestamp
 	} else {
@@ -184,13 +203,18 @@ func emit[T any](ctx context.Context, c *Context, kind event.Kind, payload T) er
 	if err != nil {
 		return fmt.Errorf("step: marshal event: %w", err)
 	}
-	// Use an uncancellable ctx for the log write: once we've decided to
-	// emit, a downstream ctx cancellation must not drop the audit trail.
-	// In particular, tool-failure events for cancelled tools would
-	// otherwise be silently dropped, leaving the chain terminated at
-	// the Scheduled event with no matching outcome.
+	// Detach from upstream cancellation so the audit trail survives a
+	// cancelled run (tool-failure events for cancelled tools, terminal
+	// events on shutdown). Optionally bound by EmitTimeout so a hung
+	// backend can't block shutdown indefinitely.
+	emitCtx := context.WithoutCancel(ctx)
+	if c.emitTimeout > 0 {
+		var cancel context.CancelFunc
+		emitCtx, cancel = context.WithTimeout(emitCtx, c.emitTimeout)
+		defer cancel()
+	}
 	start := time.Now()
-	appendErr := c.log.Append(context.WithoutCancel(ctx), c.runID, ev)
+	appendErr := c.log.Append(emitCtx, c.runID, ev)
 	if c.metrics != nil {
 		status := "ok"
 		if appendErr != nil {
@@ -227,14 +251,30 @@ func (c *Context) mintTurnID() (string, error) {
 		return newULID(), nil
 	}
 	if exhausted {
-		return "", fmt.Errorf("%w: replay stream exhausted minting TurnID at seq=%d", ErrReplayMismatch, idx+1)
+		return "", &MismatchError{
+			Seq:    uint64(idx + 1),
+			Kind:   event.KindTurnStarted,
+			Class:  MismatchExhausted,
+			Reason: fmt.Sprintf("replay stream exhausted minting TurnID at seq=%d", idx+1),
+		}
 	}
 	if rec.Kind != event.KindTurnStarted {
-		return "", fmt.Errorf("%w: seq=%d expected TurnStarted, got %s", ErrReplayMismatch, rec.Seq, rec.Kind)
+		return "", &MismatchError{
+			Seq:          rec.Seq,
+			Kind:         event.KindTurnStarted,
+			ExpectedKind: rec.Kind,
+			Class:        MismatchKind,
+			Reason:       fmt.Sprintf("seq=%d expected TurnStarted, got %s", rec.Seq, rec.Kind),
+		}
 	}
 	ts, err := rec.AsTurnStarted()
 	if err != nil {
-		return "", fmt.Errorf("%w: seq=%d decode TurnStarted: %v", ErrReplayMismatch, rec.Seq, err)
+		return "", &MismatchError{
+			Seq:    rec.Seq,
+			Kind:   event.KindTurnStarted,
+			Class:  MismatchTurnID,
+			Reason: fmt.Sprintf("seq=%d decode TurnStarted: %v", rec.Seq, err),
+		}
 	}
 	return ts.TurnID, nil
 }

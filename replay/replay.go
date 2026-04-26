@@ -20,12 +20,58 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
 	"github.com/jerkeyray/starling/step"
 )
+
+// Divergence is a structured view of a replay mismatch. Callers extract
+// it from a Verify error with errors.As.
+type Divergence struct {
+	RunID        string
+	Seq          uint64
+	Kind         event.Kind
+	ExpectedKind event.Kind
+	Class        step.MismatchClass
+	Reason       string
+}
+
+func (d *Divergence) Error() string { return d.Reason }
+func (d *Divergence) Unwrap() error { return ErrNonDeterminism }
+
+// LogAttrs returns the structured attributes describing d, suitable
+// for slog handlers that want to filter on individual fields.
+func (d *Divergence) LogAttrs() []slog.Attr {
+	return []slog.Attr{
+		slog.String("run_id", d.RunID),
+		slog.Uint64("seq", d.Seq),
+		slog.String("kind", d.Kind.String()),
+		slog.String("expected_kind", d.ExpectedKind.String()),
+		slog.String("class", string(d.Class)),
+		slog.String("reason", d.Reason),
+	}
+}
+
+// asDivergence extracts a *step.MismatchError from err and lifts it
+// into a *Divergence stamped with runID. Returns nil if err is not a
+// mismatch.
+func asDivergence(runID string, err error) *Divergence {
+	var m *step.MismatchError
+	if !errors.As(err, &m) {
+		return nil
+	}
+	return &Divergence{
+		RunID:        runID,
+		Seq:          m.Seq,
+		Kind:         m.Kind,
+		ExpectedKind: m.ExpectedKind,
+		Class:        m.Class,
+		Reason:       m.Reason,
+	}
+}
 
 // ErrNonDeterminism is returned by Verify when the re-executed run
 // diverges from the recording. Callers route on it with errors.Is.
@@ -58,8 +104,9 @@ func Verify(ctx context.Context, log eventlog.EventLog, runID string, a Agent) e
 		return fmt.Errorf("replay: run %q not found", runID)
 	}
 	if err := a.RunReplay(ctx, recorded); err != nil {
-		if errors.Is(err, step.ErrReplayMismatch) {
-			return fmt.Errorf("%w: %v", ErrNonDeterminism, err)
+		if d := asDivergence(runID, err); d != nil {
+			slog.Default().LogAttrs(ctx, slog.LevelError, "replay divergence", d.LogAttrs()...)
+			return fmt.Errorf("%w: %w", ErrNonDeterminism, d)
 		}
 		return err
 	}

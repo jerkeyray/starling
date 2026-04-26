@@ -89,6 +89,12 @@ type Config struct {
 	// RequireRawResponseHash makes LLMCall fail if the provider's
 	// ChunkEnd lacks a 32-byte hash.
 	RequireRawResponseHash bool
+
+	// EmitTimeout bounds the per-event Append the step emitter runs
+	// under context.WithoutCancel. Zero means no timeout (the historical
+	// behavior). Set this when a hung backend would otherwise block
+	// terminal/failure-path emits and prevent shutdown.
+	EmitTimeout time.Duration
 }
 
 // MetricsSink is the narrow interface step.Context uses to record
@@ -133,11 +139,34 @@ var ErrBudgetExceeded = errors.New("step: budget exceeded")
 // ErrorType="tool" is emitted before the error is returned.
 var ErrToolNotFound = errors.New("step: tool not found")
 
-// ErrReplayMismatch is returned by a non-determinism helper when the
-// next SideEffectRecorded in the replay stream doesn't match what was
-// expected — a name mismatch, a missing event, or a type-decode
-// failure. The replay verifier wraps this into starling.ErrNonDeterminism.
+// ErrReplayMismatch is the sentinel every mismatch wraps. Use
+// errors.Is to detect a divergence; errors.As against *MismatchError
+// for structured fields.
 var ErrReplayMismatch = errors.New("step: replay mismatch")
+
+// MismatchClass classifies why replay diverged.
+type MismatchClass string
+
+const (
+	MismatchExhausted MismatchClass = "exhausted"
+	MismatchKind      MismatchClass = "kind"
+	MismatchPayload   MismatchClass = "payload"
+	MismatchTurnID    MismatchClass = "turn_id"
+)
+
+// MismatchError carries the structured details of a replay divergence.
+// Implements errors.Is(ErrReplayMismatch).
+type MismatchError struct {
+	Seq          uint64
+	Kind         event.Kind
+	ExpectedKind event.Kind
+	Class        MismatchClass
+	Reason       string
+}
+
+func (e *MismatchError) Error() string { return e.Reason }
+
+func (e *MismatchError) Is(target error) bool { return target == ErrReplayMismatch }
 
 // ErrMissingRawResponseHash is returned when ChunkEnd lacks a 32-byte
 // hash and RequireRawResponseHash is set.

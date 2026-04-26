@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -15,39 +16,39 @@ import (
 // that falls this many events behind is dropped (its channel is closed).
 const streamBufferSize = 256
 
-// safeClose closes ch and swallows the panic from a double-close. The
-// fan-out path in Append closes channels for slow subscribers; our
-// cancel path also wants to close on cleanup. Two closers, one channel,
-// recover() is the cheapest correct serialization.
-func safeClose(ch chan event.Event) {
-	defer func() { _ = recover() }()
-	close(ch)
+// subscriber wraps a fan-out channel with sync.Once-guarded close so
+// the slow-consumer drop path in Append, the cancel-watcher goroutine,
+// and Close all converge to a single close.
+type subscriber struct {
+	ch    chan event.Event
+	once  sync.Once
+	runID string
 }
 
-// closeChanOnce removes ch from the run's subscriber list (if present)
-// and closes it. Idempotent against the slow-consumer drop path in
-// Append, which may have already closed ch.
-func closeChanOnce(ch chan event.Event, m *memoryLog, runID string) {
+func newSubscriber(runID string) *subscriber {
+	return &subscriber{ch: make(chan event.Event, streamBufferSize), runID: runID}
+}
+
+func (s *subscriber) close() { s.once.Do(func() { close(s.ch) }) }
+
+// detach removes sub from the run's subscriber list (if present) and
+// closes it. Idempotent against the slow-consumer drop path in Append.
+func detach(sub *subscriber, m *memoryLog) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		// Close() already closed every known subscriber. ch was either
-		// in the list (closed by Close) or already removed; either way,
-		// nothing to do here.
 		return
 	}
-	rs, ok := m.runs[runID]
-	if !ok {
-		safeClose(ch)
-		return
-	}
-	for i, sub := range rs.subscribers {
-		if sub == ch {
-			rs.subscribers = append(rs.subscribers[:i], rs.subscribers[i+1:]...)
-			break
+	rs, ok := m.runs[sub.runID]
+	if ok {
+		for i, s := range rs.subscribers {
+			if s == sub {
+				rs.subscribers = append(rs.subscribers[:i], rs.subscribers[i+1:]...)
+				break
+			}
 		}
 	}
-	safeClose(ch)
+	sub.close()
 }
 
 // NewInMemory returns an in-memory EventLog suitable for tests, demos, and
@@ -66,7 +67,7 @@ type memoryLog struct {
 
 type runState struct {
 	events      []event.Event
-	subscribers []chan event.Event
+	subscribers []*subscriber
 }
 
 func (m *memoryLog) Append(ctx context.Context, runID string, ev event.Event) error {
@@ -101,10 +102,15 @@ func (m *memoryLog) Append(ctx context.Context, runID string, ev event.Event) er
 	kept := rs.subscribers[:0]
 	for _, sub := range rs.subscribers {
 		select {
-		case sub <- ev:
+		case sub.ch <- ev:
 			kept = append(kept, sub)
 		default:
-			close(sub)
+			sub.close()
+			slog.Default().LogAttrs(ctx, slog.LevelWarn,
+				"eventlog: dropped slow stream subscriber",
+				slog.String("run_id", runID),
+				slog.Int("buffer_size", cap(sub.ch)),
+			)
 		}
 	}
 	rs.subscribers = kept
@@ -181,38 +187,32 @@ func (m *memoryLog) Stream(ctx context.Context, runID string) (<-chan event.Even
 		m.runs[runID] = rs
 	}
 
-	ch := make(chan event.Event, streamBufferSize)
+	sub := newSubscriber(runID)
 
 	// Subscribe-then-deliver-history under the lock so Appends
-	// issued after Stream returns reach ch. If history fits in the
-	// buffer, deliver inline; otherwise pump from a goroutine. Note:
-	// strict history-then-live ordering holds only when nothing
-	// Appends concurrently with the pump.
+	// issued after Stream returns reach the channel. If history fits
+	// in the buffer, deliver inline; otherwise pump from a goroutine.
 	history := make([]event.Event, len(rs.events))
 	copy(history, rs.events)
 
-	if len(history) <= cap(ch) {
+	if len(history) <= cap(sub.ch) {
 		for _, ev := range history {
-			ch <- ev
+			sub.ch <- ev
 		}
 	}
-	rs.subscribers = append(rs.subscribers, ch)
+	rs.subscribers = append(rs.subscribers, sub)
 	m.mu.Unlock()
 
-	// Cancel watcher: unregister and close ch on ctx.Done. Idempotent
-	// against the slow-consumer drop path in Append.
 	go func() {
 		<-ctx.Done()
-		closeChanOnce(ch, m, runID)
+		detach(sub, m)
 	}()
 
-	// Long-history pump runs concurrently when history overflowed the
-	// buffer. See the comment above for the ordering trade-off.
-	if len(history) > cap(ch) {
+	if len(history) > cap(sub.ch) {
 		go func() {
 			for _, ev := range history {
 				select {
-				case ch <- ev:
+				case sub.ch <- ev:
 				case <-ctx.Done():
 					return
 				}
@@ -220,7 +220,7 @@ func (m *memoryLog) Stream(ctx context.Context, runID string) (<-chan event.Even
 		}()
 	}
 
-	return ch, nil
+	return sub.ch, nil
 }
 
 func (m *memoryLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
@@ -266,7 +266,7 @@ func (m *memoryLog) Close() error {
 
 	for _, rs := range m.runs {
 		for _, sub := range rs.subscribers {
-			close(sub)
+			sub.close()
 		}
 		rs.subscribers = nil
 	}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
@@ -53,6 +54,10 @@ type ReplayStep struct {
 	// what went wrong, suitable for display in the inspector. Empty
 	// unless Diverged is true.
 	DivergenceReason string
+	// Divergence carries the structured form of the mismatch when the
+	// run error was a step.MismatchError. Nil for non-mismatch errors
+	// (tool failure, ctx cancel) or when Diverged is false.
+	Divergence *Divergence
 }
 
 // Stream re-executes runID against factory's agent and yields a
@@ -186,11 +191,19 @@ func emitFinalDivergence(
 		return // clean
 	}
 	reason := "produced fewer events than recorded"
+	var div *Divergence
 	if runErr != nil {
-		switch {
-		case errors.Is(runErr, step.ErrReplayMismatch):
+		runID := ""
+		if len(recorded) > 0 {
+			runID = recorded[0].RunID
+		}
+		div = asDivergence(runID, runErr)
+		if div != nil {
+			reason = div.Reason
+			slog.Default().LogAttrs(ctx, slog.LevelError, "replay divergence", div.LogAttrs()...)
+		} else if errors.Is(runErr, step.ErrReplayMismatch) {
 			reason = runErr.Error()
-		default:
+		} else {
 			reason = "run error: " + runErr.Error()
 		}
 	}
@@ -199,6 +212,7 @@ func emitFinalDivergence(
 		Recorded:         pickRecorded(recorded, idx),
 		Diverged:         true,
 		DivergenceReason: reason,
+		Divergence:       div,
 	}
 	select {
 	case out <- final:

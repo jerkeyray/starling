@@ -136,6 +136,7 @@ func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts
 		ResumeFromSeq:          last.Seq,
 		ResumeFromPrevHash:     event.Hash(lastEnc),
 		RequireRawResponseHash: a.Config.RequireRawResponseHash,
+		EmitTimeout:            a.Config.EmitTimeout,
 	}
 	stepCtx, err := step.NewContext(stepCfg)
 	if err != nil {
