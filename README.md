@@ -1,34 +1,61 @@
+<div align="center">
+
 # Starling
 
-**Status:** pre-release. Public API is unstable.
+**Event-sourced agent runtime for Go**
 
-Starling is a **debuggable** event-sourced agent runtime for Go.
-Every agent run is recorded as an append-only, BLAKE3-chained,
-Merkle-rooted event log, which means every execution is:
+[![CI](https://github.com/jerkeyray/starling/actions/workflows/ci.yml/badge.svg)](https://github.com/jerkeyray/starling/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/jerkeyray/starling.svg)](https://pkg.go.dev/github.com/jerkeyray/starling)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-- **Replayable** — re-run a goal byte-for-byte from the log and catch
-  any drift as `ErrNonDeterminism`. When you ship the inspector in
-  your own binary, you can click Replay in the browser and watch the
-  recorded and re-executed event streams side-by-side.
-- **Auditable** — tamper with any prior event and the Merkle root in
-  the terminal event no longer matches.
-- **Cost-enforceable** — input tokens, output tokens, USD, and
-  wall-clock budgets all enforced inline and recorded in the log.
+Replayable runs · Tamper-evident logs · Provider-neutral tools · Production debugging
 
-Your agent failed in production. Open the event log in the inspector,
-click Replay, and you see the exact step where today's behaviour
-diverged from last week's. See
-[`docs/REPLAY_DEBUGGING.md`](./docs/REPLAY_DEBUGGING.md).
+</div>
+
+> Status: pre-release. Starling is production-oriented, but the public API may
+> change before v1. Requires Go 1.26+.
+
+Starling is a Go runtime for building LLM agents where every run is recorded as
+an append-only, BLAKE3-chained, Merkle-rooted event log. When an agent fails in
+production, you can inspect the log, replay it against the same agent wiring, and
+see exactly where today's behavior diverges from the original recording.
+
+## Why Starling?
+
+| If you need... | Starling gives you... |
+| --- | --- |
+| Debuggable agent runs | A complete event stream for prompts, tool calls, provider chunks, usage, budgets, and errors. |
+| Portable replay | Deterministic re-execution from the recorded log, including MCP tool side effects. |
+| Audit evidence | Hash-chained events and Merkle roots suitable for retention, review, and incident timelines. |
+| Cost control | Token, USD, and wall-clock budgets enforced inside the runtime, not just observed after the fact. |
+| Provider choice | OpenAI-compatible, Anthropic, Gemini, OpenRouter, and local/open model backends. |
+| Operational visibility | Metrics hooks, structured divergence logs, and an embedded inspector UI. |
+
+## Features
+
+- **Event-sourced execution**: every meaningful runtime action is an event.
+- **Deterministic replay**: recorded runs can be replayed without calling the
+  model or re-running recorded side effects.
+- **Durable event logs**: in-memory, SQLite, and Postgres backends with schema
+  migration and validation helpers.
+- **Provider adapters**: OpenAI-compatible APIs, Anthropic, Gemini, and
+  OpenRouter.
+- **MCP tools**: stdio subprocess and streamable HTTP clients backed by the
+  official Go MCP SDK.
+- **Tool safety**: retries, transient error classification, typed tool errors,
+  max MCP output caps, and replay-safe side effects.
+- **Inspector**: dependency-free browser UI for exploring runs and replay
+  divergence.
+- **Observability**: metrics wrappers, OpenTelemetry-friendly examples, and
+  structured `slog` output.
 
 ## Install
 
-```sh
+```bash
 go get github.com/jerkeyray/starling
 ```
 
-Requires Go 1.26+.
-
-## Hello agent
+## Quickstart
 
 ```go
 package main
@@ -37,323 +64,242 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider/openai"
-	"github.com/jerkeyray/starling/tool"
 )
 
-type clockOut struct{ UTC string `json:"utc"` }
-
 func main() {
-	prov, _ := openai.New(openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
-	clock := tool.Typed("current_time", "Return the current UTC time.",
-		func(_ context.Context, _ struct{}) (clockOut, error) {
-			return clockOut{UTC: time.Now().UTC().Format(time.RFC3339)}, nil
-		})
+	ctx := context.Background()
 
-	a := &starling.Agent{
-		Provider: prov,
-		Tools:    []tool.Tool{clock},
-		Log:      eventlog.NewInMemory(),
-		Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
-	}
-	res, err := a.Run(context.Background(), "What is the current UTC time?")
+	prov, err := openai.New(openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(res.FinalText)
+
+	log := eventlog.NewInMemory()
+	a := &starling.Agent{
+		Provider: prov,
+		Log:      log,
+		Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
+	}
+
+	run, err := a.Run(ctx, "Give me a three bullet incident summary.")
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(run.FinalText)
 }
 ```
 
-A runnable version (with event-log dump and tamper-evidence check)
-lives at [`examples/m1_hello`](./examples/m1_hello).
+## Core Model
 
-## Durable log (SQLite)
+```text
+Agent.Run
+  -> provider.Stream
+  -> tool execution
+  -> budget checks
+  -> append-only event log
+  -> replay / inspect / resume
+```
 
-Swap `NewInMemory` for `NewSQLite` to persist every event to disk.
-The log survives process crashes, is hash-chained on insert, and
-opens cleanly on restart:
+Starling treats the event log as the source of truth. The runtime records model
+requests, streaming chunks, tool calls, usage, budget decisions, terminal states,
+and replay metadata as structured events. Backends validate event ordering,
+schema versions, and hash continuity.
+
+## Durable Logs
+
+Use SQLite or Postgres when runs must survive process restarts or be inspected
+later.
 
 ```go
-log, err := eventlog.NewSQLite("runs.db")
-if err != nil { panic(err) }
-defer log.Close()
-
-a := &starling.Agent{
-	Provider: prov,
-	Tools:    []tool.Tool{clock},
-	Log:      log,
-	Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
+log, err := eventlog.NewSQLite("starling.db")
+if err != nil {
+	panic(err)
 }
+defer log.Close()
 ```
 
-Pass `":memory:"` as the path for an ephemeral database.
+Durable backends support schema preflight checks, migrations, validation, and
+retention workflows. See [docs/EVENTS.md](docs/EVENTS.md) and
+[docs/RETENTION.md](docs/RETENTION.md).
 
-## Replay a run
+## Replay And Resume
 
-Once a run is persisted you can re-execute it against the same agent
-and verify every emitted event matches the recording:
+Replay a recorded run against the same agent wiring:
 
 ```go
 if err := starling.Replay(ctx, log, runID, a); err != nil {
 	if errors.Is(err, starling.ErrNonDeterminism) {
-		// A tool output, prompt, or model changed since the original
-		// run. Inspect err for the first diverging seq.
+		// Inspect the log for the first diverging event.
 	}
-	// other errors (log-read, transport, ...) surface verbatim
+	panic(err)
 }
 ```
 
-See [`docs/REPLAY.md`](./docs/REPLAY.md) for the full cookbook:
-determinism rules, common causes of `ErrNonDeterminism`, and an
-end-to-end crash-then-replay example.
+Resume continues from a persisted run while preserving call correlation and
+budget accounting.
 
-## Resume a crashed run
-
-`(*Agent).Resume(ctx, runID, extraMessage)` reconstructs conversation
-state from the log and re-enters the agent loop so a run that died
-mid-flight can finish in a new process. Partial tool calls are
-re-issued with fresh CallIDs by default; pass
-`starling.WithReissueTools(false)` via `ResumeWith` for tools with
-mutation side effects. See [`docs/RESUME.md`](./docs/RESUME.md).
+```go
+next, err := a.Resume(ctx, runID, "Continue with remediation steps.")
+```
 
 ## Providers
 
-### OpenAI-compatible
+| Provider | Package | Notes |
+| --- | --- | --- |
+| OpenAI-compatible | `provider/openai` | OpenAI, Groq, Together, Ollama, vLLM, LM Studio, Azure OpenAI, and compatible APIs via custom `BaseURL`. |
+| Anthropic | `provider/anthropic` | Messages API support, tool use, thinking/signatures, and prompt caching metadata. |
+| Gemini | `provider/gemini` | Native Gemini adapter for Google models. |
+| OpenRouter | `provider/openrouter` | OpenRouter-specific convenience wrapper over the OpenAI-compatible path. |
 
-The `openai` package is the OpenAI-compatible provider. Point it at
-any compatible API with `WithBaseURL`:
+Provider behavior is covered by a conformance suite so adapters share the same
+streaming, usage, tool-call, and error contracts. See
+[docs/PROVIDER_SUPPORT.md](docs/PROVIDER_SUPPORT.md).
 
-```go
-prov, _ := openai.New(
-	openai.WithAPIKey(os.Getenv("GROQ_API_KEY")),
-	openai.WithBaseURL("https://api.groq.com/openai/v1"),
-)
-// then use model "llama-3.1-8b-instant" etc.
-```
+## MCP Tools
 
-Same pattern works for Together, OpenRouter, Ollama, vLLM, LM Studio,
-Azure OpenAI.
-
-### Anthropic
-
-The `anthropic` package speaks the Messages API directly, including
-extended-thinking with signature replay, redacted-thinking blocks,
-and per-message prompt caching via `Message.Annotations`:
+Starling can expose remote MCP tools as regular `tool.Tool` values.
 
 ```go
-import "github.com/jerkeyray/starling/provider/anthropic"
-
-prov, _ := anthropic.New(anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
-// Model: "claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5", ...
-```
-
-See [`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md) for the
-full feature matrix across both providers.
-
-## MCP tools
-
-Mount Model Context Protocol tools as ordinary Starling tools. The
-adapter supports three transports — stdio (subprocess), streamable
-HTTP, and any custom `mcp.Transport` — and the core runtime stays
-MCP-agnostic.
-
-```go
-import (
-	"os/exec"
-	mcptool "github.com/jerkeyray/starling/tool/mcp"
-)
-
-// Stdio: launch a local MCP server as a subprocess.
-client, err := mcptool.NewCommand(ctx,
+client, err := toolmcp.NewCommand(ctx,
 	exec.Command("uvx", "mcp-server-filesystem", "/tmp"),
-	mcptool.WithToolNamePrefix("fs_"),
-	mcptool.WithCallTimeout(10*time.Second),
+	toolmcp.WithIncludeTools("read_file", "list_directory"),
+	toolmcp.WithMaxOutputBytes(64<<10),
 )
-if err != nil { panic(err) }
+if err != nil {
+	panic(err)
+}
 defer client.Close()
 
-mcpTools, err := client.Tools(ctx)
-if err != nil { panic(err) }
+tools, err := client.Tools(ctx)
+if err != nil {
+	panic(err)
+}
 
 a := &starling.Agent{
 	Provider: prov,
-	Tools:    append(localTools, mcpTools...),
 	Log:      log,
+	Tools:    tools,
 	Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 8},
 }
 ```
 
-`NewHTTP(ctx, url, httpClient, opts...)` swaps the transport for a
-streamable HTTP endpoint; `New(ctx, transport, opts...)` accepts any
-`mcp.Transport` for advanced use.
+Supported transports:
 
-Useful options:
+- `toolmcp.NewCommand(ctx, cmd, opts...)` for stdio subprocess servers.
+- `toolmcp.NewHTTP(ctx, endpoint, httpClient, opts...)` for streamable HTTP servers.
+- `toolmcp.New(ctx, transport, opts...)` for custom transports.
 
-- `WithToolNamePrefix(p)` — namespace remote tools.
-- `WithIncludeTools(...)` / `WithExcludeTools(...)` — filter by remote name.
-- `WithCallTimeout(d)` — per-call deadline; zero leaves cancellation to ctx.
-- `WithMaxOutputBytes(n)` — cap the JSON-encoded result; default 1 MiB.
-- `WithTextOnly(true)` — reject non-text content instead of forwarding it.
-- `WithTransientErrorClassifier(fn)` — wrap classified transport errors as `tool.ErrTransient` so caller-configured retries kick in.
+MCP tool calls are wrapped in `step.SideEffect`, so replay uses the recorded
+result instead of contacting the remote MCP server again. Starling currently
+supports MCP tools; resources, prompts, and sampling are intentionally deferred.
 
-**Replay is automatic.** Each MCP call is routed through
-`step.SideEffect`, so a recorded run replays straight from the event
-log without re-contacting the server. The MCP server only runs at
-record time. The same applies under `Resume` — the orphaned MCP call
-is reissued under a fresh `CallID` and a new live invocation is
-recorded.
+## Budgets And Retries
 
-What's intentionally not adapted yet: MCP resources, prompts, and
-sampling. The current package adapts tools only — see
-[`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md).
-
-## Budgets
-
-Set any combination of the four budget axes on `Agent.Budget`. Zero
-values disable that axis. When a cap trips the runtime emits a
-`BudgetExceeded` event and terminates with
-`RunFailed{ErrorType:"budget"}`:
+Budgets can cap input tokens, output tokens, USD cost, and wall-clock runtime.
 
 ```go
 a := &starling.Agent{
 	Provider: prov,
-	Tools:    tools,
 	Log:      log,
 	Budget: &starling.Budget{
-		MaxInputTokens:  100_000,            // pre-call, before every LLM call
-		MaxOutputTokens: 4_000,              // mid-stream, on every usage chunk
-		MaxUSD:          0.50,               // mid-stream, using per-model prices
-		MaxWallClock:    30 * time.Second,   // context.WithDeadline on the run
+		MaxInputTokens:  20_000,
+		MaxOutputTokens: 4_000,
+		MaxUSD:          0.50,
+		MaxWallClock:    30 * time.Second,
 	},
 	Config: starling.Config{Model: "gpt-4o-mini", MaxTurns: 8},
 }
 ```
 
-## Retry transient tool errors
-
-Tools that know a failure is retryable (HTTP 503, rate-limit,
-transient network) wrap the error with `tool.ErrTransient`:
+Tool retries are explicit and replay-aware:
 
 ```go
-return nil, fmt.Errorf("upstream 503: %w", tool.ErrTransient)
-```
-
-Callers opt into retry per call, and only for operations they're
-comfortable re-executing:
-
-```go
-step.CallTool(ctx, step.ToolCall{
-	Name:        "fetch",
+out, err := step.CallTool(ctx, step.ToolCall{
+	CallID:      "fetch-ticket",
+	TurnID:      turnID,
+	Name:        "fetch_ticket",
 	Args:        args,
 	Idempotent:  true,
 	MaxAttempts: 3,
-	// Backoff is optional — default is exponential 100ms → 10s
-	// with 0–25% jitter. In replay, sleeps are skipped.
 })
 ```
 
-Non-idempotent calls (or calls without `MaxAttempts > 1`) run exactly
-once, regardless of transience.
-
-## What's in the box
-
-Agent runtime:
-- `Agent` + ReAct loop with `MaxTurns` cap
-- Typed tools via `tool.Typed[In, Out]`
-- Parallel tool dispatch (`step.CallTools`)
-- Opt-in retry with exponential backoff for idempotent tools
-
-Providers:
-- OpenAI-compatible streaming provider (OpenAI, Groq, Together,
-  OpenRouter, Ollama, vLLM, LM Studio, Azure)
-- Anthropic Messages provider with extended-thinking + caching
-
-Event log:
-- In-memory backend (`eventlog.NewInMemory`)
-- SQLite backend (`eventlog.NewSQLite`) with WAL-mode durability
-- BLAKE3 hash chain + Merkle root on every terminal event
-- `eventlog.Validate` for full-run tamper detection
-
-Replay & budgets:
-- `starling.Replay` verifier with `ErrNonDeterminism`
-- Deterministic helpers: `step.Now`, `step.Random`, `step.SideEffect`
-- All four budget axes: input tokens, output tokens, USD, wall-clock
-- Per-model USD cost lookup
-
-Observability & multi-tenant:
-- `Config.Logger *slog.Logger` for structured side-channel trace
-- OpenTelemetry spans (`agent.run` → `agent.turn` → `agent.llm_call`
-  / `agent.tool_call`); no-op when no SDK is wired
-- `Agent.Namespace` prefixes RunIDs so one event log can host many
-  tenants safely
-
 ## Inspector
 
-A self-contained web UI for browsing event logs: runs list, event
-timeline, per-event detail, a hash-chain validation badge, and —
-when you wire it into your own binary — replay-from-UI with the
-recorded and re-executed streams rendered side-by-side. No CDN, no
-JS build step. Loopback-only by default, with optional bearer-token
-auth when you need to expose it beyond localhost.
+The inspector serves a local browser UI for recorded runs.
 
-**View-only** — install the standalone binary, point it at a SQLite
-log:
-
-```sh
-go install github.com/jerkeyray/starling/cmd/starling-inspect@latest
-starling-inspect /path/to/runs.db
+```bash
+go run ./cmd/starling-inspect starling.db
 ```
 
-**Full mode (replay enabled)** — embed `starling.InspectCommand` in
-your own agent binary and pass a factory that builds your
-`*starling.Agent`. Because the factory is the same function that
-built the original run, replay stays faithful. See
-[`examples/m1_hello`](./examples/m1_hello) for a working dual-mode
-binary:
+Open `http://localhost:8080` to inspect event streams, tool calls, usage,
+budgets, replay results, and divergence details. The inspector is a self-hosted
+Go server with no CDN or JavaScript build step.
 
-```sh
-OPENAI_API_KEY=sk-... go run ./examples/m1_hello run
-go run ./examples/m1_hello inspect ./runs.db
+## Production Checklist
+
+- Run `make check` before release: format, vet, build, race tests, lint, and
+  vulnerability scan.
+- Pick a durable log backend for production runs: SQLite for single-node use,
+  Postgres for shared infrastructure.
+- Run eventlog preflight and migrations during deploys.
+- Protect inspector access behind your normal internal auth boundary.
+- Set explicit budgets for tokens, cost, and wall-clock runtime.
+- Use idempotent retries and per-call timeouts for tools that touch external
+  systems.
+- Use replay regression tests for critical agent workflows.
+- Store raw provider responses only when your privacy and retention policy
+  allows it.
+- Review [docs/SECURITY.md](docs/SECURITY.md) and
+  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) before production use.
+
+## Examples
+
+| Example | What it shows |
+| --- | --- |
+| [examples/m1_hello](examples/m1_hello) | Minimal agent run. |
+| [examples/incident_triage](examples/incident_triage) | End-to-end production-style workflow with budgets, replay, resume, metrics, OTel, and durable logs. |
+| [examples/mcp_tools](examples/mcp_tools) | MCP server tools adapted into Starling tools. |
+| [examples/m4_inspector_demo](examples/m4_inspector_demo) | Local run data for the inspector. |
+
+## Documentation
+
+| Document | Purpose |
+| --- | --- |
+| [docs/API.md](docs/API.md) | Public package layout and core APIs. |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Runtime architecture and data flow. |
+| [docs/EVENTS.md](docs/EVENTS.md) | Event schema, validation rules, and migration notes. |
+| [docs/REPLAY.md](docs/REPLAY.md) | Replay semantics and determinism rules. |
+| [docs/REPLAY_DEBUGGING.md](docs/REPLAY_DEBUGGING.md) | Debugging failed runs with replay and inspector workflows. |
+| [docs/PROVIDER_SUPPORT.md](docs/PROVIDER_SUPPORT.md) | Provider feature matrix and adapter notes. |
+| [docs/INSPECT.md](docs/INSPECT.md) | Inspector usage, flags, and security model. |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Runtime deployment guidance. |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security model and operator responsibilities. |
+| [docs/RETENTION.md](docs/RETENTION.md) | Event retention and privacy guidance. |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Design decisions and tradeoffs. |
+| [docs/PERF_TUNING.md](docs/PERF_TUNING.md) | Performance tuning notes and benchmarks. |
+
+## Development
+
+```bash
+make check
 ```
 
-Or the no-API-key demo:
+Useful targets:
 
-```sh
-make demo-inspect
+```bash
+make test      # race-enabled Go test suite
+make lint      # golangci-lint
+make vuln      # govulncheck
+make inspect   # run the inspector locally
+make smoke     # quick end-to-end smoke run
 ```
-
-See [`docs/INSPECT.md`](./docs/INSPECT.md) for flags and the
-security model, and [`docs/REPLAY_DEBUGGING.md`](./docs/REPLAY_DEBUGGING.md)
-for the debugging workflow.
-
-## Observability
-
-Three layers, mix and match: the **event log** (audit trail),
-**`log/slog`** (live trace via `Config.Logger`), and **OpenTelemetry**
-spans around every step boundary (no-op tracer when no SDK is
-configured). See
-[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §6.3 for the full
-picture and §6.2 for the synchronous-write / backpressure contract.
-
-## Docs
-
-- [`docs/API.md`](./docs/API.md) — public API reference
-- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — package layout and data flow
-- [`docs/DECISIONS.md`](./docs/DECISIONS.md) — design decisions (ADR-style)
-- [`docs/EVENTS.md`](./docs/EVENTS.md) — event schema + CBOR wire format
-- [`docs/REPLAY.md`](./docs/REPLAY.md) — replay cookbook
-- [`docs/REPLAY_DEBUGGING.md`](./docs/REPLAY_DEBUGGING.md) — debugging failed runs with replay + inspector
-- [`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md) — provider feature matrix
-- [`docs/INSPECT.md`](./docs/INSPECT.md) — `starling-inspect` web inspector
-- [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model, auth, secrets, hash-chain semantics
-- [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — process model, backends, migrations, Docker/k8s
-- [`docs/PERF_TUNING.md`](./docs/PERF_TUNING.md) — append latency, stream buffering, replay throughput
-- [`docs/RETENTION.md`](./docs/RETENTION.md) — deletion, archive, partitioning, PII
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
