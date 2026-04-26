@@ -433,8 +433,13 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 	recorded := c.recorded
 	c.mu.Unlock()
 
+	// Stop walking once we've seen the final outcome for every CallID
+	// in the current batch. Without this, a recording that contains
+	// later-turn tool completions would trip the "not in current
+	// batch" guard.
 	lastIdx := make(map[string]int, len(calls))
-	for i := start; i < len(recorded); i++ {
+	seen := make(map[string]bool, len(calls))
+	for i := start; i < len(recorded) && len(seen) < len(calls); i++ {
 		ev := recorded[i]
 		var callID string
 		switch ev.Kind {
@@ -457,6 +462,15 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 			return nil, fmt.Errorf("%w: recorded completion for CallID %q not in current batch", ErrReplayMismatch, callID)
 		}
 		lastIdx[callID] = i
+		// A retry ends with a Completed *or* a final Failed. Mark the
+		// CallID as seen on the outcome that would terminate live
+		// retries: Completed always, Failed only when no further
+		// retries are recorded for the same CallID.
+		if ev.Kind == event.KindToolCallCompleted {
+			seen[callID] = true
+		} else if !hasLaterAttempt(recorded, i, callID) {
+			seen[callID] = true
+		}
 	}
 	if len(lastIdx) != len(calls) {
 		return nil, fmt.Errorf("%w: expected %d tool outcomes in recording, found %d", ErrReplayMismatch, len(calls), len(lastIdx))
@@ -481,6 +495,26 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 		order[i] = p.idx
 	}
 	return order, nil
+}
+
+// hasLaterAttempt reports whether recorded contains another Scheduled
+// for callID at any seq > start. Used by replayCompletionOrder to
+// distinguish a final Failed from a transient Failed that will be
+// retried later in the recording.
+func hasLaterAttempt(recorded []event.Event, start int, callID string) bool {
+	for i := start + 1; i < len(recorded); i++ {
+		if recorded[i].Kind != event.KindToolCallScheduled {
+			continue
+		}
+		tcs, err := recorded[i].AsToolCallScheduled()
+		if err != nil {
+			continue
+		}
+		if tcs.CallID == callID {
+			return true
+		}
+	}
+	return false
 }
 
 // emitToolFailed emits the Failed event and returns the underlying
