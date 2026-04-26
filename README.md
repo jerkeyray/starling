@@ -1,19 +1,19 @@
 <div align="center">
 
-# Starling
+```text
+███████╗████████╗ █████╗ ██████╗ ██╗     ██╗███╗   ██╗ ██████╗
+██╔════╝╚══██╔══╝██╔══██╗██╔══██╗██║     ██║████╗  ██║██╔════╝
+███████╗   ██║   ███████║██████╔╝██║     ██║██╔██╗ ██║██║  ███╗
+╚════██║   ██║   ██╔══██║██╔══██╗██║     ██║██║╚██╗██║██║   ██║
+███████║   ██║   ██║  ██║██║  ██║███████╗██║██║ ╚████║╚██████╔╝
+╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝
+```
 
-**Event-sourced agent runtime for Go**
-
-[![CI](https://github.com/jerkeyray/starling/actions/workflows/ci.yml/badge.svg)](https://github.com/jerkeyray/starling/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/jerkeyray/starling.svg)](https://pkg.go.dev/github.com/jerkeyray/starling)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+**Event-sourced ADK for Go**
 
 Replayable runs · Tamper-evident logs · Provider-neutral tools · Production debugging
 
 </div>
-
-> Status: pre-release. Starling is production-oriented, but the public API may
-> change before v1. Requires Go 1.26+.
 
 Starling is a Go runtime for building LLM agents where every run is recorded as
 an append-only, BLAKE3-chained, Merkle-rooted event log. When an agent fails in
