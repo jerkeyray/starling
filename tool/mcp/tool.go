@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jerkeyray/starling/step"
 	stool "github.com/jerkeyray/starling/tool"
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -44,6 +45,31 @@ func (t *mcpTool) Execute(ctx context.Context, input json.RawMessage) (json.RawM
 		args = map[string]any{}
 	}
 
+	// Route through step.SideEffect so the outcome is recorded once at
+	// run time and replayed without contacting the MCP server. Outside
+	// an agent context (no step.Context attached) we fall back to a
+	// direct call.
+	live := func() (mcpOutcome, error) { return t.callRemote(ctx, args) }
+	if _, ok := step.From(ctx); !ok {
+		out, err := live()
+		if err != nil {
+			return nil, err
+		}
+		return out.toExecuteResult(t.name)
+	}
+	out, err := step.SideEffect(ctx, "mcp/"+t.remoteName, live)
+	if err != nil {
+		return nil, err
+	}
+	return out.toExecuteResult(t.name)
+}
+
+// callRemote performs the live MCP CallTool round-trip. Errors are
+// classified and wrapped with tool.ErrTransient when the configured
+// classifier reports the error retryable. Tool-level errors (the
+// server returned IsError=true) are folded into mcpOutcome rather
+// than returned as errors so step.SideEffect records them.
+func (t *mcpTool) callRemote(ctx context.Context, args any) (mcpOutcome, error) {
 	callCtx := ctx
 	cancel := func() {}
 	if timeout := t.client.cfg.CallTimeout; timeout > 0 {
@@ -57,19 +83,31 @@ func (t *mcpTool) Execute(ctx context.Context, input json.RawMessage) (json.RawM
 	})
 	if err != nil {
 		if t.client.cfg.TransientErrorClassifier != nil && t.client.cfg.TransientErrorClassifier(err) {
-			return nil, fmt.Errorf("mcp tool %q: %w: %w", t.name, err, stool.ErrTransient)
+			return mcpOutcome{}, fmt.Errorf("mcp tool %q: %w: %w", t.name, err, stool.ErrTransient)
 		}
-		return nil, fmt.Errorf("mcp tool %q: %w", t.name, err)
+		return mcpOutcome{}, fmt.Errorf("mcp tool %q: %w", t.name, err)
 	}
 
-	out, err := encodeResult(res, t.client.cfg)
+	encoded, err := encodeResult(res, t.client.cfg)
 	if err != nil {
-		return nil, fmt.Errorf("mcp tool %q: %w", t.name, err)
+		return mcpOutcome{}, fmt.Errorf("mcp tool %q: %w", t.name, err)
 	}
-	if res.IsError {
-		return nil, &ToolError{Name: t.name, Result: out}
+	return mcpOutcome{Result: encoded, IsError: res.IsError}, nil
+}
+
+// mcpOutcome is the recordable shape of a single MCP tool call.
+// Carries both the success and tool-error paths so step.SideEffect can
+// replay either without re-contacting the server.
+type mcpOutcome struct {
+	Result  json.RawMessage `cbor:"result"`
+	IsError bool            `cbor:"is_error,omitempty"`
+}
+
+func (o mcpOutcome) toExecuteResult(name string) (json.RawMessage, error) {
+	if o.IsError {
+		return nil, &ToolError{Name: name, Result: o.Result}
 	}
-	return out, nil
+	return o.Result, nil
 }
 
 // ToolError reports an MCP tool-level error result. Result contains the

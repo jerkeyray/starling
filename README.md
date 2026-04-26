@@ -156,21 +156,27 @@ full feature matrix across both providers.
 
 ## MCP tools
 
-MCP server tools can be mounted as ordinary Starling tools. The adapter
-supports stdio command servers and streamable HTTP endpoints; the core
-agent runtime stays MCP-agnostic.
+Mount Model Context Protocol tools as ordinary Starling tools. The
+adapter supports three transports — stdio (subprocess), streamable
+HTTP, and any custom `mcp.Transport` — and the core runtime stays
+MCP-agnostic.
 
 ```go
-import toolmcp "github.com/jerkeyray/starling/tool/mcp"
+import (
+	"os/exec"
+	mcptool "github.com/jerkeyray/starling/tool/mcp"
+)
 
-mcpClient, err := toolmcp.NewHTTP(ctx, "http://localhost:3000/mcp", nil,
-	toolmcp.WithToolNamePrefix("mcp_"),
-	toolmcp.WithCallTimeout(10*time.Second),
+// Stdio: launch a local MCP server as a subprocess.
+client, err := mcptool.NewCommand(ctx,
+	exec.Command("uvx", "mcp-server-filesystem", "/tmp"),
+	mcptool.WithToolNamePrefix("fs_"),
+	mcptool.WithCallTimeout(10*time.Second),
 )
 if err != nil { panic(err) }
-defer mcpClient.Close()
+defer client.Close()
 
-mcpTools, err := mcpClient.Tools(ctx)
+mcpTools, err := client.Tools(ctx)
 if err != nil { panic(err) }
 
 a := &starling.Agent{
@@ -181,10 +187,29 @@ a := &starling.Agent{
 }
 ```
 
-MCP tools replay like any other external `tool.Tool`: replay re-runs
-the tool call and checks the result against the recorded
-`ToolCallCompleted` payload. The same MCP server must be reachable
-and deterministic for clean replay.
+`NewHTTP(ctx, url, httpClient, opts...)` swaps the transport for a
+streamable HTTP endpoint; `New(ctx, transport, opts...)` accepts any
+`mcp.Transport` for advanced use.
+
+Useful options:
+
+- `WithToolNamePrefix(p)` — namespace remote tools.
+- `WithIncludeTools(...)` / `WithExcludeTools(...)` — filter by remote name.
+- `WithCallTimeout(d)` — per-call deadline; zero leaves cancellation to ctx.
+- `WithMaxOutputBytes(n)` — cap the JSON-encoded result; default 1 MiB.
+- `WithTextOnly(true)` — reject non-text content instead of forwarding it.
+- `WithTransientErrorClassifier(fn)` — wrap classified transport errors as `tool.ErrTransient` so caller-configured retries kick in.
+
+**Replay is automatic.** Each MCP call is routed through
+`step.SideEffect`, so a recorded run replays straight from the event
+log without re-contacting the server. The MCP server only runs at
+record time. The same applies under `Resume` — the orphaned MCP call
+is reissued under a fresh `CallID` and a new live invocation is
+recorded.
+
+What's intentionally not adapted yet: MCP resources, prompts, and
+sampling. The current package adapts tools only — see
+[`docs/PROVIDER_SUPPORT.md`](./docs/PROVIDER_SUPPORT.md).
 
 ## Budgets
 

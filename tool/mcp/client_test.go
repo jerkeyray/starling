@@ -7,9 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jerkeyray/starling/event"
+	"github.com/jerkeyray/starling/eventlog"
+	"github.com/jerkeyray/starling/step"
 	"github.com/jerkeyray/starling/tool"
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -323,4 +327,127 @@ func toolNames(tools []tool.Tool) []string {
 		out[i] = t.Name()
 	}
 	return out
+}
+
+// TestReplayDoesNotContactServer pins the W1-style replay-safety
+// guarantee for MCP: a recorded run must replay using the recorded
+// SideEffectRecorded value without re-issuing the live MCP CallTool.
+func TestReplayDoesNotContactServer(t *testing.T) {
+	ctx := context.Background()
+	var hits atomic.Int32
+
+	server := gomcp.NewServer(&gomcp.Implementation{Name: "server", Version: "v0.0.1"}, nil)
+	server.AddTool(&gomcp.Tool{
+		Name:        "echo",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}, func(_ context.Context, _ *gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
+		hits.Add(1)
+		return &gomcp.CallToolResult{StructuredContent: map[string]any{"v": 1}}, nil
+	})
+
+	clientTransport, serverTransport := gomcp.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverTransport) }()
+	client, err := New(ctx, clientTransport)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	tools, err := client.Tools(ctx)
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	mcpEcho := tools[0]
+
+	// --- live: record the SideEffect via a step.Context ----------------
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+	const runID = "mcp-replay-1"
+	if err := log.Append(ctx, runID, seedRunStarted(t, runID)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	live := step.MustNewContext(step.Config{
+		Log:                log,
+		RunID:              runID,
+		ResumeFromSeq:      1,
+		ResumeFromPrevHash: prevHashOf(t, runID, log),
+	})
+	liveCtx := step.WithContext(ctx, live)
+	out, err := mcpEcho.Execute(liveCtx, nil)
+	if err != nil {
+		t.Fatalf("live Execute: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("server hits after live = %d, want 1", hits.Load())
+	}
+
+	// --- replay: feed the recorded events back; expect zero new hits --
+	recorded, err := log.Read(ctx, runID)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	replaySink := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = replaySink.Close() })
+	if err := replaySink.Append(ctx, runID, recorded[0]); err != nil {
+		t.Fatalf("seed replay sink: %v", err)
+	}
+	enc, err := event.Marshal(recorded[0])
+	if err != nil {
+		t.Fatalf("Marshal seed: %v", err)
+	}
+	replayCtx := step.MustNewContext(step.Config{
+		Log:                replaySink,
+		RunID:              runID,
+		Mode:               step.ModeReplay,
+		Recorded:           recorded,
+		ResumeFromSeq:      1,
+		ResumeFromPrevHash: event.Hash(enc),
+	})
+	replayOut, err := mcpEcho.Execute(step.WithContext(ctx, replayCtx), nil)
+	if err != nil {
+		t.Fatalf("replay Execute: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("server hits after replay = %d, want 1 (replay must not contact the server)", hits.Load())
+	}
+	if string(replayOut) != string(out) {
+		t.Fatalf("replay output = %s, want %s", replayOut, out)
+	}
+}
+
+func seedRunStarted(t *testing.T, runID string) event.Event {
+	t.Helper()
+	payload, err := event.EncodePayload(event.RunStarted{
+		SchemaVersion: event.SchemaVersion,
+		Goal:          "test",
+		ProviderID:    "test",
+		ModelID:       "test",
+	})
+	if err != nil {
+		t.Fatalf("EncodePayload: %v", err)
+	}
+	return event.Event{
+		RunID:     runID,
+		Seq:       1,
+		Timestamp: 1,
+		Kind:      event.KindRunStarted,
+		Payload:   payload,
+	}
+}
+
+func prevHashOf(t *testing.T, runID string, log eventlog.EventLog) []byte {
+	t.Helper()
+	evs, err := log.Read(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(evs) == 0 {
+		return nil
+	}
+	last := evs[len(evs)-1]
+	enc, err := event.Marshal(last)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	return event.Hash(enc)
 }
