@@ -77,6 +77,26 @@ func TestFilterByStatus(t *testing.T) {
 	}
 }
 
+func TestFilterByQuery(t *testing.T) {
+	rows := []runRow{
+		{RunID: "01HZ-alpha", StatusLabel: "completed"},
+		{RunID: "01HZ-beta", StatusLabel: "failed"},
+		{RunID: "ns/01HZ-gamma", StatusLabel: "completed"},
+	}
+	if got := filterByQuery(rows, ""); len(got) != 3 {
+		t.Errorf("empty query dropped rows: %d", len(got))
+	}
+	if got := filterByQuery(rows, "BETA"); len(got) != 1 || got[0].RunID != "01HZ-beta" {
+		t.Errorf("BETA query: %+v", got)
+	}
+	if got := filterByQuery(rows, "ns/"); len(got) != 1 || got[0].RunID != "ns/01HZ-gamma" {
+		t.Errorf("ns/ query: %+v", got)
+	}
+	if got := filterByQuery(rows, "failed"); len(got) != 1 {
+		t.Errorf("status query: %+v", got)
+	}
+}
+
 func TestRowsFromSummaries(t *testing.T) {
 	now := time.Date(2026, 4, 20, 10, 30, 0, 0, time.UTC)
 	in := []eventlog.RunSummary{

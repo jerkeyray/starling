@@ -2,20 +2,25 @@
 <header class="page-head">
   <h1>Runs <span class="count">{{len .Rows}} of {{.Total}}</span></h1>
   <div class="controls">
-    <input
-      id="filter"
-      type="search"
-      placeholder="filter by run id…"
-      autocomplete="off"
-      aria-label="filter runs by id"
-    >
+    <form id="search-form" method="get" action="/" role="search">
+      {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
+      <input
+        id="filter"
+        name="q"
+        type="search"
+        placeholder="search runs (id, status)…"
+        autocomplete="off"
+        value="{{.Query}}"
+        aria-label="search runs"
+      >
+    </form>
     <nav class="status-tabs" aria-label="filter by status">
-      {{$cur := .Status}}
-      <a href="/" class="tab {{if eq $cur ""}}active{{end}}">all</a>
-      <a href="/?status=completed"   class="tab {{if eq $cur "completed"}}active{{end}}">completed</a>
-      <a href="/?status=failed"      class="tab {{if eq $cur "failed"}}active{{end}}">failed</a>
-      <a href="/?status=cancelled"   class="tab {{if eq $cur "cancelled"}}active{{end}}">cancelled</a>
-      <a href="/?status=in+progress" class="tab {{if eq $cur "in progress"}}active{{end}}">in progress</a>
+      {{$cur := .Status}}{{$q := .Query}}
+      <a href="/{{if $q}}?q={{$q}}{{end}}" class="tab {{if eq $cur ""}}active{{end}}">all</a>
+      <a href="/?status=completed{{if $q}}&q={{$q}}{{end}}"   class="tab {{if eq $cur "completed"}}active{{end}}">completed</a>
+      <a href="/?status=failed{{if $q}}&q={{$q}}{{end}}"      class="tab {{if eq $cur "failed"}}active{{end}}">failed</a>
+      <a href="/?status=cancelled{{if $q}}&q={{$q}}{{end}}"   class="tab {{if eq $cur "cancelled"}}active{{end}}">cancelled</a>
+      <a href="/?status=in+progress{{if $q}}&q={{$q}}{{end}}" class="tab {{if eq $cur "in progress"}}active{{end}}">in progress</a>
     </nav>
   </div>
 </header>

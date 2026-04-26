@@ -155,6 +155,49 @@ beyond `localhost`.
   writing to the same DB stays correct: the inspector sees new rows
   on the next read. Pinned by `TestSQLite_ReadOnly_SeesLiveWrites`.
 
+### Production mode
+
+For deployments past `localhost`, treat the inspector as an internal
+admin surface and front it with infrastructure that handles TLS,
+auth, and audit logging. Recommended pattern:
+
+1. **TLS-terminating reverse proxy.** nginx / Caddy / cloud LB owns
+   the public certificate; the inspector binds to `127.0.0.1:8080` or
+   a Unix socket inside the trust boundary.
+2. **Bearer token always set.** Generate via `openssl rand -hex 32`,
+   inject through `STARLING_INSPECT_TOKEN`, rotate when operators
+   change. Empty tokens are a misconfiguration — the inspector logs a
+   loud warning at startup if `--addr` is non-loopback and no
+   token/auth handler is set.
+3. **mTLS at the proxy** for stronger access control. The inspector
+   does not consume client certs; the proxy decision is authoritative.
+   See `docs/SECURITY.md` for an nginx recipe.
+4. **SSE-friendly proxy config.** Live tail and replay both use
+   long-lived SSE connections. Disable buffering and bump
+   `proxy_read_timeout` (nginx) / equivalent. Without this, the
+   inspector appears to hang after a few seconds.
+5. **Cookie scope.** The CSRF cookie is `SameSite=Strict` and not
+   marked `Secure`. When serving over HTTPS, terminate at the proxy
+   and let the proxy upgrade the cookie via a Set-Cookie rewrite, or
+   wrap the inspector handler in middleware that flips `Secure: true`
+   on the response.
+6. **Request logging.** The inspector itself does not log requests.
+   Rely on the proxy access log; pipe it to the same audit pipeline
+   that ingests the event log.
+7. **Session limits.** A single replay session pins one re-execution
+   loop; a hostile or buggy operator can spawn unbounded sessions.
+   Cap concurrent connections at the proxy until session-quota
+   support lands in-tree.
+8. **Inspector metrics.** Not yet exposed. Front-of-proxy metrics
+   (request count, latency, byte counts) are the immediate handle.
+
+### Mobile / on-call
+
+The inspector layout collapses to a single column below 900 px and
+re-stacks the timeline event row at 600 px. Replay is usable on phone
+widths but the parallel-column visualization shrinks; prefer landscape
+for divergence triage.
+
 ## Live tail
 
 The run-detail page auto-appends events for runs that are still in

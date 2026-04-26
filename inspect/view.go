@@ -88,6 +88,23 @@ func filterByStatus(rows []runRow, want string) []runRow {
 	return out
 }
 
+// filterByQuery does a case-insensitive substring match against
+// RunID and StatusLabel. Empty query returns rows unchanged.
+func filterByQuery(rows []runRow, q string) []runRow {
+	q = strings.TrimSpace(strings.ToLower(q))
+	if q == "" {
+		return rows
+	}
+	out := make([]runRow, 0, len(rows))
+	for _, r := range rows {
+		if strings.Contains(strings.ToLower(r.RunID), q) ||
+			strings.Contains(strings.ToLower(r.StatusLabel), q) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // run detail view models
 // ---------------------------------------------------------------------------

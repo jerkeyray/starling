@@ -22,12 +22,15 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	rows := rowsFromSummaries(summaries)
 	statusFilter := r.URL.Query().Get("status")
 	rows = filterByStatus(rows, statusFilter)
+	query := r.URL.Query().Get("q")
+	rows = filterByQuery(rows, query)
 
 	s.tpl.render(w, "runs.html", http.StatusOK, map[string]any{
 		"Title":  "Runs",
 		"Rows":   rows,
 		"Total":  len(summaries),
 		"Status": statusFilter,
+		"Query":  query,
 	})
 }
 

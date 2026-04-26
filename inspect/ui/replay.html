@@ -29,7 +29,17 @@
 
 <dialog id="diverge-dialog">
   <header><strong>Divergence</strong> at step <span id="dd-index"></span></header>
+  <dl id="dd-fields" class="diverge-fields" hidden>
+    <dt>class</dt>      <dd id="dd-class"></dd>
+    <dt>seq</dt>        <dd id="dd-seq"></dd>
+    <dt>recorded</dt>   <dd id="dd-expected"></dd>
+    <dt>produced</dt>   <dd id="dd-actual"></dd>
+  </dl>
   <pre id="dd-reason"></pre>
+  <details id="dd-payload" hidden>
+    <summary>recorded payload</summary>
+    <pre id="dd-payload-body"></pre>
+  </details>
   <form method="dialog"><button class="btn">close</button></form>
 </dialog>
 

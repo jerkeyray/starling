@@ -315,6 +315,24 @@ table.runs td.num, table.runs th.num {
   .detail { position: static !important; max-height: none !important; }
 }
 
+/* Narrow / phone widths: collapse the four-column event row into a
+   two-line stack so timeline content stays readable on-call. */
+@media (max-width: 600px) {
+  .ev a {
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    grid-template-areas:
+      "seq kind"
+      "time summary";
+    row-gap: 0.15rem;
+  }
+  .ev-seq { grid-area: seq; }
+  .ev-kind { grid-area: kind; white-space: normal; }
+  .ev-time { grid-area: time; }
+  .ev-summary { grid-area: summary; white-space: normal; }
+  .timeline { max-height: none; }
+  .detail { max-height: none; }
+}
+
 /* timeline-head: filter + count above the list */
 .timeline-head {
   display: flex;
@@ -605,6 +623,9 @@ table.runs td.num, table.runs th.num {
 @media (max-width: 900px) {
   .replay-pane { grid-template-columns: 1fr; }
 }
+@media (max-width: 600px) {
+  .replay-list { max-height: none; }
+}
 .replay-col h2 {
   font-size: 0.75rem;
   margin: 0 0 0.5rem;
@@ -665,4 +686,21 @@ table.runs td.num, table.runs th.num {
   word-break: break-word;
   max-height: 16rem;
   overflow-y: auto;
+}
+.diverge-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}
+.diverge-fields dt { color: var(--muted); font-family: var(--mono); }
+.diverge-fields dd { margin: 0; font-family: var(--mono); }
+#dd-expected { color: #15803d; }
+#dd-actual   { color: #b91c1c; }
+#dd-payload summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 0.4rem 0 0.3rem;
 }

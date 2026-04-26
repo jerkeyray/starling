@@ -31,7 +31,14 @@
   const stepBtn    = document.getElementById("ctl-step");
   const resumeBtn  = document.getElementById("ctl-resume");
   const restartBtn = document.getElementById("ctl-restart");
-  const dlg        = document.getElementById("diverge-dialog");
+  const dlg          = document.getElementById("diverge-dialog");
+  const ddFields     = document.getElementById("dd-fields");
+  const ddClass      = document.getElementById("dd-class");
+  const ddSeq        = document.getElementById("dd-seq");
+  const ddExpected   = document.getElementById("dd-expected");
+  const ddActual     = document.getElementById("dd-actual");
+  const ddPayload    = document.getElementById("dd-payload");
+  const ddPayloadBody= document.getElementById("dd-payload-body");
   const ddIndex    = document.getElementById("dd-index");
   const ddReason   = document.getElementById("dd-reason");
 
@@ -148,10 +155,32 @@
   function openDivergence(step) {
     ddIndex.textContent  = String(step.Index);
     ddReason.textContent = step.DivergenceReason || "(no reason)";
+
+    if (step.Divergence) {
+      ddFields.hidden    = false;
+      ddClass.textContent    = step.Divergence.Class    || "";
+      ddSeq.textContent      = String(step.Divergence.Seq || step.Index);
+      ddExpected.textContent = step.Divergence.ExpectedKind || "(none)";
+      ddActual.textContent   = step.Divergence.Kind         || "(none)";
+    } else {
+      ddFields.hidden = true;
+    }
+
+    if (step.Recorded && step.Recorded.Payload) {
+      try {
+        const decoded = JSON.parse(atob(step.Recorded.Payload));
+        ddPayloadBody.textContent = JSON.stringify(decoded, null, 2);
+        ddPayload.hidden = false;
+      } catch (_) {
+        ddPayload.hidden = true;
+      }
+    } else {
+      ddPayload.hidden = true;
+    }
+
     if (typeof dlg.showModal === "function") {
       dlg.showModal();
     } else {
-      // dialog polyfill missing — fall back to alert.
       alert("Divergence at " + step.Index + ":\n\n" + step.DivergenceReason);
     }
   }
