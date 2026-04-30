@@ -27,10 +27,6 @@ func authServer(t *testing.T, opts ...Option) (*httptest.Server, string) {
 	return hs, runID
 }
 
-// ---------------------------------------------------------------------
-// auth
-// ---------------------------------------------------------------------
-
 // TestAuth_NoAuth_200 confirms the default posture — no WithAuth
 // option — keeps every route reachable. Regression guard against a
 // future middleware accidentally denying by default.
@@ -137,10 +133,6 @@ func TestBearerAuth_PanicsOnEmpty(t *testing.T) {
 	}()
 	_ = BearerAuth("")
 }
-
-// ---------------------------------------------------------------------
-// CSRF
-// ---------------------------------------------------------------------
 
 // fakeFactoryServer wires a server with a replay.Factory so the
 // replay POST endpoints are live (not 404). CSRF tests only care
@@ -269,10 +261,6 @@ func TestCSRF_UnsafeMethodGuarded(t *testing.T) {
 		t.Errorf("POST without CSRF = %d, want 403", resp.StatusCode)
 	}
 }
-
-// ---------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------
 
 func hasCSRFCookie(cs []*http.Cookie) bool {
 	for _, c := range cs {

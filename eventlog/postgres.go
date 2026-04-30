@@ -1,32 +1,15 @@
 package eventlog
 
-// Postgres-backed EventLog. Full parity with NewSQLite on the
-// EventLog + RunLister interfaces; adds multi-process, multi-host
-// concurrent writers — the property SQLite cannot offer.
+// Postgres-backed EventLog. Parity with NewSQLite plus multi-process,
+// multi-host concurrent writers. Caller brings a *sql.DB; we don't
+// import a driver, so SQLite-only users don't pay the pgx cost.
 //
-// Driver: the user brings a *sql.DB. We support the pgx/v5 stdlib
-// adapter (sql.Open("pgx", dsn) or stdlib.OpenDB) and lib/pq
-// transparently — we never import a driver ourselves. That keeps the
-// dependency surface of downstream binaries small: a user who only
-// uses SQLite doesn't compile pgx.
-//
-// Concurrency model: each Append runs inside a transaction that first
-// takes pg_advisory_xact_lock(hashtextextended(run_id, 0)). The lock
-// is released at commit/rollback. Two Appends on the same run_id
-// serialize on this lock; Appends on different run_ids proceed in
-// parallel. The PK (run_id, seq) is a belt-and-suspenders check.
-//
-// Stream semantics in v1: poll at streamPollInterval. LISTEN/NOTIFY
-// is deferred until the live-tail milestone (§1.2 of the roadmap) —
-// pinning a pgx conn out of the pool per subscriber is its own
-// ergonomics problem and polling at 50ms matches SQLite's latency
-// floor.
-//
-// Read-only: the WithReadOnlyPG option flips an in-process flag so
-// Append returns ErrReadOnly. For real enforcement, give the
-// inspector's database role no INSERT/UPDATE/DELETE privilege on the
-// eventlog_events table. The flag is defence in depth, not the
-// boundary.
+// Each Append runs inside a transaction that first takes
+// pg_advisory_xact_lock(hashtextextended(run_id, 0)), serializing
+// writers on the same run_id. Stream polls at streamPollInterval;
+// LISTEN/NOTIFY is deferred. WithReadOnlyPG is in-process defence in
+// depth — for real enforcement, revoke INSERT/UPDATE/DELETE at the
+// database role.
 
 import (
 	"context"
@@ -45,10 +28,9 @@ import (
 // rationale, different constant so we can tune independently.
 const pgStreamPollInterval = 50 * time.Millisecond
 
-// pgMigrations are forward-only DDL steps applied by Migrate. v1 is
-// the initial M2 schema; users who managed schema externally before
-// migrations existed will have their existing eventlog_events table
-// detected and stamped as v1.
+// pgMigrations are forward-only DDL steps applied by Migrate. v1
+// creates eventlog_events; tables managed externally before migrations
+// existed are detected and stamped as v1.
 var pgMigrations = []migration{
 	{
 		version: 1,

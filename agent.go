@@ -50,7 +50,7 @@ type Agent struct {
 
 	// Namespace prefixes this agent's RunIDs so multiple tenants can
 	// share one event log. When set, RunID = Namespace + "/" + ULID;
-	// must not contain "/". Empty preserves pre-M3 behavior.
+	// must not contain "/". Empty leaves RunID as a bare ULID.
 	Namespace string
 
 	// Metrics is an optional Prometheus sink. Nil disables the
@@ -628,10 +628,6 @@ func (a *Agent) validate() error {
 	return nil
 }
 
-// ----------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------
-
 // stats is the aggregated view computed from the event stream for the
 // terminal event payload and RunResult.
 type stats struct {
@@ -785,13 +781,7 @@ func classifyRunError(err error) event.RunErrorType {
 	return event.RunErrorInternal
 }
 
-// ----------------------------------------------------------------------
-// ULID
-// ----------------------------------------------------------------------
-
-var (
-	agentUlidMu sync.Mutex
-)
+var agentUlidMu sync.Mutex
 
 func newULID() string {
 	agentUlidMu.Lock()
@@ -799,18 +789,8 @@ func newULID() string {
 	return ulid.MustNew(ulid.Timestamp(time.Now()), cryptorand.Reader).String()
 }
 
-// ----------------------------------------------------------------------
-// stepEmit adapter
-// ----------------------------------------------------------------------
-
-// stepEmit bridges to step's internal emit. We can't call step.emit
-// directly (unexported), so we piggyback on step.SideEffect — no,
-// that records a different event kind. Instead we call a dedicated
-// helper below that the step package exposes for the agent loop.
-//
-// For M1 the agent emits RunStarted / terminal events directly via
-// a helper that mirrors step.emit's logic but uses the Context's
-// exported methods. See step.Emit (added for T9).
+// stepEmit bridges to step.Emit so the agent loop can emit RunStarted
+// and terminal events through the same code path the step package uses.
 func stepEmit[T any](ctx context.Context, sc *step.Context, kind event.Kind, payload T) error {
 	return step.Emit(ctx, sc, kind, payload)
 }

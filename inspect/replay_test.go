@@ -405,10 +405,6 @@ func TestRoutes_NamespacedRunID(t *testing.T) {
 	}
 }
 
-// ----------------------------------------------------------------------
-// helpers
-// ----------------------------------------------------------------------
-
 func startSession(t *testing.T, hs *httptest.Server, runID string) string {
 	t.Helper()
 	client, token := primeCSRF(t, hs)

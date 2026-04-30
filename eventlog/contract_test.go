@@ -187,10 +187,6 @@ func (cb *chainBuilder) nextKind(t *testing.T, runID string, ts int64, kind even
 	return ev
 }
 
-// -----------------------------------------------------------------------
-// Append invariants
-// -----------------------------------------------------------------------
-
 func TestContract_Append_FirstEventMustStartAtSeq1(t *testing.T) {
 	for _, bk := range backends(t) {
 		t.Run(bk.name, func(t *testing.T) {
@@ -363,10 +359,6 @@ func TestContract_Append_HappyPath(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------
-// Read
-// -----------------------------------------------------------------------
-
 func TestContract_Read_UnknownRunIDReturnsNil(t *testing.T) {
 	for _, bk := range backends(t) {
 		t.Run(bk.name, func(t *testing.T) {
@@ -413,10 +405,6 @@ func TestContract_Read_ReturnsDefensiveCopy(t *testing.T) {
 		})
 	}
 }
-
-// -----------------------------------------------------------------------
-// Stream
-// -----------------------------------------------------------------------
 
 func TestContract_Stream_ReplayThenLive(t *testing.T) {
 	for _, bk := range backends(t) {
@@ -492,10 +480,6 @@ func TestContract_Stream_ContextCancelClosesChannel(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------
-// Close
-// -----------------------------------------------------------------------
-
 func TestContract_Close_BlocksFurtherAppend(t *testing.T) {
 	for _, bk := range backends(t) {
 		t.Run(bk.name, func(t *testing.T) {
@@ -525,10 +509,6 @@ func TestContract_Close_Idempotent(t *testing.T) {
 		})
 	}
 }
-
-// -----------------------------------------------------------------------
-// ListRuns — matrix lives here; exercised by TestContract_ListRuns_*.
-// -----------------------------------------------------------------------
 
 func TestContract_ListRuns_Empty(t *testing.T) {
 	for _, bk := range backends(t) {

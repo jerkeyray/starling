@@ -112,10 +112,6 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  m1_hello replay <db> <id>  # headless replay verification (exits nonzero on drift)")
 }
 
-// ----------------------------------------------------------------------
-// mode: run
-// ----------------------------------------------------------------------
-
 func runAgent(_ []string) error {
 	shutdownOtel := maybeInstallOtel()
 	defer shutdownOtel()
@@ -153,10 +149,6 @@ func runAgent(_ []string) error {
 	return nil
 }
 
-// ----------------------------------------------------------------------
-// mode: inspect (dual-mode hook — the point of this example)
-// ----------------------------------------------------------------------
-
 // runInspect delegates to starling.InspectCommand with a replay factory
 // that builds the SAME Agent the run path built. The inspector opens
 // the db read-only; the factory only fires when the user clicks Replay.
@@ -188,10 +180,6 @@ func runReplay(args []string) error {
 	cmd.Name = "m1_hello replay"
 	return cmd.Run(args)
 }
-
-// ----------------------------------------------------------------------
-// shared construction
-// ----------------------------------------------------------------------
 
 // buildAgent is the single source of truth for the Agent's
 // configuration — same Provider, Tools, Config in run and replay. This

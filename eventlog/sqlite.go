@@ -100,9 +100,8 @@ func initSQLite(db *sql.DB) error {
 
 // sqliteMigrations are forward-only DDL steps applied in order.
 //
-//	v1 — create eventlog_events with the M1 column set.
-//	v2 — adopt the canonical name on legacy databases that were created
-//	     when the table was called "events".
+//	v1 — create eventlog_events.
+//	v2 — rename legacy "events" tables to the canonical name.
 var sqliteMigrations = []migration{
 	{
 		version: 1,

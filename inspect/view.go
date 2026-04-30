@@ -105,10 +105,6 @@ func filterByQuery(rows []runRow, q string) []runRow {
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// run detail view models
-// ---------------------------------------------------------------------------
-
 // eventRow is one row in the timeline pane of the run detail page.
 // Pre-computed so the template stays declarative — no calls into the
 // event package, no conditional rendering off Kind integers.

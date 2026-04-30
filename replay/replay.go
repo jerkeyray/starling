@@ -1,19 +1,9 @@
-// Package replay runs a recorded event log back through the agent loop
-// and verifies the reproduced event sequence matches the log.
-//
-// Verify re-executes the run against a fresh in-memory log using a
-// replay-mode provider that reconstructs streams from the recorded
-// assistant messages. Every event the re-executed agent tries to emit
-// is compared against the recorded event at the matching seq
-// (byte-for-byte on Payload; Timestamps come from the recording so the
-// chain hash sequence is identical).
-//
-// Tools are re-executed live; their outputs are compared against the
-// recorded ToolCallCompleted.Result via the same emit-compare path. A
-// tool that now returns different bytes surfaces as a divergence.
-//
-// Any mismatch returns an error that wraps ErrNonDeterminism; callers
-// route on it with errors.Is.
+// Package replay re-runs a recorded event log through the agent loop
+// and verifies the reproduced events match the recording byte-for-byte.
+// Streams are reconstructed from recorded assistant messages; tools
+// are re-executed live and their outputs compared against the recorded
+// ToolCallCompleted.Result. Mismatches return an error wrapping
+// ErrNonDeterminism.
 package replay
 
 import (

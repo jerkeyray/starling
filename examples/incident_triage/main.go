@@ -54,10 +54,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  incident_triage resume <db> <runID>     # resume a crashed run")
 }
 
-// ----------------------------------------------------------------------
-// run
-// ----------------------------------------------------------------------
-
 func runOnce(_ []string) error {
 	shutdown := maybeOTel()
 	defer shutdown()
@@ -95,10 +91,6 @@ func runOnce(_ []string) error {
 	return runErr
 }
 
-// ----------------------------------------------------------------------
-// inspect
-// ----------------------------------------------------------------------
-
 func runInspect(args []string) error {
 	factory := replay.Factory(func(ctx context.Context) (replay.Agent, error) {
 		// Use canned + no-op notify on replay so re-execution stays
@@ -114,10 +106,6 @@ func runInspect(args []string) error {
 	return cmd.Run(args)
 }
 
-// ----------------------------------------------------------------------
-// replay (headless)
-// ----------------------------------------------------------------------
-
 func runReplay(args []string) error {
 	factory := replay.Factory(func(ctx context.Context) (replay.Agent, error) {
 		return buildAgent(ctx, buildOpts{
@@ -130,10 +118,6 @@ func runReplay(args []string) error {
 	cmd.Name = "incident_triage replay"
 	return cmd.Run(args)
 }
-
-// ----------------------------------------------------------------------
-// resume
-// ----------------------------------------------------------------------
 
 func runResume(args []string) error {
 	if len(args) < 2 {
@@ -158,10 +142,6 @@ func runResume(args []string) error {
 	fmt.Println("resumed:", summarizeRun(res))
 	return nil
 }
-
-// ----------------------------------------------------------------------
-// otel
-// ----------------------------------------------------------------------
 
 func maybeOTel() func() {
 	if os.Getenv("OTEL") != "1" {

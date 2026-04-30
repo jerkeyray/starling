@@ -12,16 +12,12 @@ import (
 )
 
 // newReplayProvider builds a provider.Provider that reconstructs stream
-// chunks from a recorded event log. Each Stream() call advances to the
-// next turn's recorded events and replays them as a canonical chunk
-// sequence. The step package re-aggregates those chunks into the same
-// AssistantMessageCompleted payload that was originally recorded, so
-// emit-compare in step.Context under ModeReplay verifies equality.
-//
-// The reconstructed stream omits token timings (deltas are delivered
-// as a single Text chunk, tool-use args as a single Delta) — the
-// aggregate state after draining matches the live run, which is all
-// the replay verifier checks.
+// chunks from a recorded event log. Each Stream() advances to the next
+// turn's events and replays them as canonical chunks; the step package
+// re-aggregates them into the original AssistantMessageCompleted so
+// emit-compare under ModeReplay verifies equality. Token-level timings
+// are not preserved (deltas collapse to one chunk per turn) — only the
+// post-drain aggregate matters to the verifier.
 func newReplayProvider(info provider.Info, recorded []event.Event) (*replayProvider, error) {
 	turns, err := groupByTurn(recorded)
 	if err != nil {

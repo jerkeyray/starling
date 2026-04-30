@@ -6,14 +6,9 @@ import (
 	"github.com/jerkeyray/starling/eventlog"
 )
 
-// openStore opens a SQLite event log at path in read-only mode. It is
-// the shared entrypoint used by ValidateCommand, ExportCommand, and
-// ReplayCommand so every CLI subcommand treats the log as immutable
-// by construction. Returns a wrapped error on open failure.
-//
-// SQLite is the only backend supported by the built-in CLI commands
-// today; Postgres support will land alongside the §1.1 Postgres-ops
-// follow-up.
+// openStore opens a SQLite event log at path read-only. Shared by
+// every built-in CLI subcommand so the log is immutable by
+// construction.
 func openStore(path string) (eventlog.EventLog, error) {
 	store, err := eventlog.NewSQLite(path, eventlog.WithReadOnly())
 	if err != nil {

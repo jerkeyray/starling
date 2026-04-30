@@ -149,7 +149,7 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 		ev := event.ReasoningEmitted{
 			TurnID:    turnID,
 			Content:   reasoningBuf.String(),
-			Sensitive: true, // per EVENTS.md §3.4: always true for schema symmetry
+			Sensitive: true, // always true; the field exists for schema symmetry
 			Signature: sig,
 		}
 		reasoningBuf.Reset()

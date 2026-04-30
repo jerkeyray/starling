@@ -32,9 +32,8 @@ type ReadFileOutput struct {
 // an invalid baseDir is a caller (user) bug, not a programmer bug, so
 // the error is surfaced rather than panicked.
 //
-// Note: this deviates from the zero-arg signature sketched in API.md §5.1.
-// A caller-supplied base directory is the only way to bound file access
-// safely; defaulting to "." would silently expose the process's cwd.
+// baseDir is required: defaulting to "." would silently expose the
+// process's cwd.
 func ReadFile(baseDir string) (tool.Tool, error) {
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {

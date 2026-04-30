@@ -32,10 +32,6 @@ import (
 const defaultDB = "./incident_triage.db"
 const namespace = "incident-triage"
 
-// ----------------------------------------------------------------------
-// tools
-// ----------------------------------------------------------------------
-
 type metricLookupIn struct {
 	Service string `json:"service"`
 	Metric  string `json:"metric"`
@@ -151,10 +147,6 @@ func escalateTool(notify func(channel, summary string) error) tool.Tool {
 	)
 }
 
-// ----------------------------------------------------------------------
-// canned provider — used in CI replay tests and as a no-key default
-// ----------------------------------------------------------------------
-
 // cannedProvider replays a fixed sequence of provider streams. Mirrors
 // the test scaffolding in the root package so the example can run in
 // CI without API keys.
@@ -234,10 +226,6 @@ func scriptedTriage() [][]provider.StreamChunk {
 		},
 	}
 }
-
-// ----------------------------------------------------------------------
-// agent construction
-// ----------------------------------------------------------------------
 
 type buildOpts struct {
 	dbPath    string

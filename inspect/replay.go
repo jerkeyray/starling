@@ -1,16 +1,8 @@
-// Replay session machinery.
-//
-// A replay session is a long-lived in-process object that drives one
-// run of replay.Stream, applies pause/step/resume/restart controls,
-// and forwards the streamed ReplaySteps to whichever SSE consumer
-// happens to be subscribed. Session lifetime is independent of any
-// SSE connection: a browser tab that goes away leaves the session
-// idle; the GC sweep below collects it after sessionGCAfter.
-//
-// All session state lives in the session's run goroutine; control
-// commands and SSE outputs cross goroutine boundaries via channels,
-// not mutexes (the only shared mutex is on Server.sessions for the
-// id→session lookup).
+// Replay session machinery. A session drives one replay.Stream run,
+// applies pause/step/resume/restart controls, and forwards ReplaySteps
+// to whichever SSE consumer is subscribed. Sessions outlive their SSE
+// connections and are GC'd after sessionGCAfter idle. State is
+// goroutine-local; control + output cross goroutines via channels.
 
 package inspect
 
@@ -31,8 +23,8 @@ import (
 const (
 	// sessionGCAfter is how long a session may sit idle (no live SSE
 	// subscriber, no recent control POST) before the janitor cancels
-	// it. 60s matches the M5 plan; long enough that a reload survives,
-	// short enough that abandoned tabs don't leak forever.
+	// it. 60s is long enough that a reload survives, short enough that
+	// abandoned tabs don't leak forever.
 	sessionGCAfter = 60 * time.Second
 
 	// sessionGCInterval is how often the janitor wakes up to sweep.
@@ -214,9 +206,8 @@ func (s *Server) handleReplayStream(w http.ResponseWriter, r *http.Request, runI
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	// Defeat proxy buffering. Documented in the M5 plan as
-	// "out-of-scope for some corporate proxies"; this gives us a
-	// fighting chance against nginx defaults.
+	// Defeat nginx-style proxy buffering. Doesn't help against every
+	// corporate proxy, but covers the common case.
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
@@ -304,14 +295,9 @@ func (s *Server) lookupSession(runID, sessionID string) *replaySession {
 	return sess
 }
 
-// gcReplaySessions runs as a background janitor for the lifetime of
-// the Server. Started from New only when a Replayer is wired. Sweeps
-// every sessionGCInterval; any session whose lastUsed is older than
-// sessionGCAfter is cancelled and removed from the map.
-//
-// We do not currently expose a way to stop the Server, so the
-// janitor lives forever. When Server gains a Close, this loop
-// should select on a stop channel.
+// gcReplaySessions sweeps every sessionGCInterval and cancels any
+// session whose lastUsed is older than sessionGCAfter. Started from
+// New only when a Replayer is wired; runs for the Server's lifetime.
 func (s *Server) gcReplaySessions() {
 	ticker := time.NewTicker(sessionGCInterval)
 	defer ticker.Stop()

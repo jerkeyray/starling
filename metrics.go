@@ -1,21 +1,7 @@
-// Prometheus metrics surface. Opt-in via Agent.Metrics; nil is a
-// no-op, so library callers who don't care pay nothing. Every record
-// method on *Metrics short-circuits on a nil receiver, which keeps
-// every call site a straight `c.metrics.observeX(...)` with no
-// guard.
-//
-// The collector set is fixed — no user-defined labels, no dynamic
-// series at runtime. Label values are either closed enums (status,
-// error_type, kind, axis, type) or caller-bounded names (model,
-// tool) that come from the Agent's configured provider/registry.
-// Cardinality is therefore bounded by the caller's static config,
-// not by anything the running agent can invent per-request: a
-// stray tool name or a bespoke error string never leaks into the
-// scrape output.
-//
-// Callers who dynamically mint tool names per request (an unusual
-// pattern) should pre-hash or bucket the name before adding it to
-// Agent.Tools, or register a dedicated registry per tenant.
+// Prometheus metrics. Opt-in via Agent.Metrics; nil is a no-op so the
+// no-metrics path has no overhead. Cardinality is bounded by the
+// caller's static config (closed-enum labels plus model/tool names
+// from the registry); the agent never mints labels per-request.
 
 package starling
 
@@ -151,9 +137,7 @@ func MetricsHandler(g prometheus.Gatherer) http.Handler {
 	return promhttp.HandlerFor(g, promhttp.HandlerOpts{})
 }
 
-// --------------------------------------------------------------
-// Record methods — all nil-safe. Call unconditionally.
-// --------------------------------------------------------------
+// Record methods are all nil-safe; callers invoke them unconditionally.
 
 // onRunStarted bumps runs_started and runs_in_flight. Call once per
 // Run entry.
@@ -233,10 +217,6 @@ func (m *Metrics) onBudgetExceeded(axis string) {
 	}
 	m.budgetExceeded.WithLabelValues(axis).Inc()
 }
-
-// --------------------------------------------------------------
-// step.MetricsSink bridge
-// --------------------------------------------------------------
 
 // stepSink returns an implementation of step.MetricsSink backed
 // by this *Metrics. Nil receivers return nil so the step layer

@@ -1,7 +1,7 @@
 // Package inspect implements Starling's local web inspector as a
 // reusable library. The standalone binary cmd/starling-inspect is a
 // thin shim around inspect.New; downstream users who want full
-// functionality (including replay-from-UI, M5+) wire inspect.New
+// functionality (including replay-from-UI) wire inspect.New
 // into their own agent binary so the server can construct the user's
 // Agent on demand.
 //
