@@ -342,7 +342,7 @@ depends on packages like ULID, BLAKE3, and OpenTelemetry.
 | Agent runtime | `starling` | `Agent`, `Config`, `Budget`, commands |
 | Event schema | `starling/event` | envelope, payloads, hashing, JSON projection |
 | Event storage | `starling/eventlog` | in-memory, SQLite, Postgres, validation |
-| Providers | `starling/provider/*` | OpenAI, Anthropic, Gemini, OpenRouter |
+| Providers | `starling/provider/*` | OpenAI, Anthropic, Gemini, Bedrock, OpenRouter |
 | Tools | `starling/tool` | interface + `tool.Typed` |
 | Deterministic runtime ops | `starling/step` | LLM/tool/time/random helpers |
 | Replay plumbing | `starling/replay` | verify + side-by-side replay stream |

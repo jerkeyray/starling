@@ -127,10 +127,10 @@ func TestPayload_RoundTrip(t *testing.T) {
 
 	t.Run("BudgetExceeded", func(t *testing.T) {
 		assertRoundTrip(t, event.BudgetExceeded{
-			Limit:         "output_tokens",
+			Limit:         event.LimitOutputTokens,
 			Cap:           2000,
 			Actual:        2100,
-			Where:         "mid_stream",
+			Where:         event.WhereMidStream,
 			TurnID:        "turn-3",
 			CallID:        "",
 			PartialText:   "partial output...",

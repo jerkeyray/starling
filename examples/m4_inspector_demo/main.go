@@ -103,10 +103,10 @@ func seedFailedRun(ctx context.Context, log eventlog.EventLog, runID string, bas
 		CallID: "c1", TurnID: "t1", ToolName: "fetch", Attempt: 1,
 	})
 	w.append(event.KindToolCallFailed, event.ToolCallFailed{
-		CallID: "c1", Error: "no such host", ErrorType: "network", DurationMs: 234, Attempt: 1,
+		CallID: "c1", Error: "no such host", ErrorType: event.ToolErrorType("network"), DurationMs: 234, Attempt: 1, Final: true,
 	})
 	w.finishFailed(event.RunFailed{
-		Error: "tool fetch failed after 1 attempt", ErrorType: "tool_failure", DurationMs: 600,
+		Error: "tool fetch failed after 1 attempt", ErrorType: event.RunErrorTool, DurationMs: 600,
 	})
 }
 

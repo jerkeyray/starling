@@ -106,9 +106,9 @@ func runToolSafely(ctx context.Context, tl tool.Tool, input json.RawMessage) (ou
 }
 
 // classifyToolError maps an execErr into the canonical ErrorType set.
-func classifyToolError(ctx context.Context, execErr error) string {
+func classifyToolError(ctx context.Context, execErr error) event.ToolErrorType {
 	if errors.Is(execErr, tool.ErrPanicked) {
-		return "panic"
+		return event.ToolErrorPanic
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		// Either the tool returned ctx.Err directly or it wrapped a
@@ -116,10 +116,10 @@ func classifyToolError(ctx context.Context, execErr error) string {
 		if errors.Is(execErr, context.Canceled) ||
 			errors.Is(execErr, context.DeadlineExceeded) ||
 			errors.Is(execErr, ctxErr) {
-			return "cancelled"
+			return event.ToolErrorCancelled
 		}
 	}
-	return "tool"
+	return event.ToolErrorTool
 }
 
 // CallTools dispatches a batch of tool calls, emitting ToolCallScheduled
@@ -286,9 +286,9 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			obs.SetSpanError(attemptSpan, ErrToolNotFound)
 			attemptSpan.End()
 			if c.metrics != nil {
-				c.metrics.ObserveToolCall(call.Name, "error", "tool", 0)
+				c.metrics.ObserveToolCall(call.Name, "error", string(event.ToolErrorTool), 0)
 			}
-			return nil, emitToolFailed(ctx, c, call.CallID, ErrToolNotFound, "tool", 0, uint32(attempt))
+			return nil, emitToolFailed(ctx, c, call.CallID, ErrToolNotFound, event.ToolErrorTool, 0, uint32(attempt), true)
 		}
 		tl, ok := reg.Get(call.Name)
 		if !ok {
@@ -296,9 +296,9 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			obs.SetSpanError(attemptSpan, wrapped)
 			attemptSpan.End()
 			if c.metrics != nil {
-				c.metrics.ObserveToolCall(call.Name, "error", "tool", 0)
+				c.metrics.ObserveToolCall(call.Name, "error", string(event.ToolErrorTool), 0)
 			}
-			return nil, emitToolFailed(ctx, c, call.CallID, wrapped, "tool", 0, uint32(attempt))
+			return nil, emitToolFailed(ctx, c, call.CallID, wrapped, event.ToolErrorTool, 0, uint32(attempt), true)
 		}
 
 		start := time.Now()
@@ -310,7 +310,7 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			errType := "none"
 			if execErr != nil {
 				status = "error"
-				errType = classifyToolError(ctx, execErr)
+				errType = string(classifyToolError(ctx, execErr))
 			}
 			c.metrics.ObserveToolCall(call.Name, status, errType, wall)
 		}
@@ -352,7 +352,7 @@ func executeOne(ctx context.Context, c *Context, call ToolCall) (json.RawMessage
 			ctx.Err() == nil
 		if !retryable || attempt == attempts {
 			attemptSpan.End()
-			return nil, emitToolFailed(ctx, c, call.CallID, execErr, errType, durMs, uint32(attempt))
+			return nil, emitToolFailed(ctx, c, call.CallID, execErr, errType, durMs, uint32(attempt), true)
 		}
 
 		// Not terminal: emit Failed for this attempt, sleep backoff,
@@ -455,6 +455,21 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 				return nil, fmt.Errorf("%w: decode ToolCallFailed at seq=%d: %v", ErrReplayMismatch, ev.Seq, err)
 			}
 			callID = tcf.CallID
+			// Trust Final when set; fall back to forward scan for
+			// logs written before the Final field existed.
+			if tcf.Final || !hasLaterAttempt(recorded, i, callID) {
+				if _, ok := idxByCallID[callID]; !ok {
+					return nil, fmt.Errorf("%w: recorded completion for CallID %q not in current batch", ErrReplayMismatch, callID)
+				}
+				lastIdx[callID] = i
+				seen[callID] = true
+				continue
+			}
+			if _, ok := idxByCallID[callID]; !ok {
+				return nil, fmt.Errorf("%w: recorded completion for CallID %q not in current batch", ErrReplayMismatch, callID)
+			}
+			lastIdx[callID] = i
+			continue
 		default:
 			continue
 		}
@@ -462,13 +477,8 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 			return nil, fmt.Errorf("%w: recorded completion for CallID %q not in current batch", ErrReplayMismatch, callID)
 		}
 		lastIdx[callID] = i
-		// A retry ends with a Completed *or* a final Failed. Mark the
-		// CallID as seen on the outcome that would terminate live
-		// retries: Completed always, Failed only when no further
-		// retries are recorded for the same CallID.
+		// Completed always terminates retries.
 		if ev.Kind == event.KindToolCallCompleted {
-			seen[callID] = true
-		} else if !hasLaterAttempt(recorded, i, callID) {
 			seen[callID] = true
 		}
 	}
@@ -498,9 +508,9 @@ func replayCompletionOrder(c *Context, calls []ToolCall) ([]int, error) {
 }
 
 // hasLaterAttempt reports whether recorded contains another Scheduled
-// for callID at any seq > start. Used by replayCompletionOrder to
-// distinguish a final Failed from a transient Failed that will be
-// retried later in the recording.
+// for callID at any seq > start. Fallback for legacy logs that predate
+// ToolCallFailed.Final; new logs let replayCompletionOrder trust Final
+// directly.
 func hasLaterAttempt(recorded []event.Event, start int, callID string) bool {
 	for i := start + 1; i < len(recorded); i++ {
 		if recorded[i].Kind != event.KindToolCallScheduled {
@@ -519,14 +529,16 @@ func hasLaterAttempt(recorded []event.Event, start int, callID string) bool {
 
 // emitToolFailed emits the Failed event and returns the underlying
 // error (so CallTool's caller gets the wrapped error, not a
-// log-emission error unless the emit itself failed).
-func emitToolFailed(ctx context.Context, c *Context, callID string, execErr error, errType string, durMs int64, attempt uint32) error {
+// log-emission error unless the emit itself failed). final=true marks
+// the event as terminal for this CallID (retries exhausted).
+func emitToolFailed(ctx context.Context, c *Context, callID string, execErr error, errType event.ToolErrorType, durMs int64, attempt uint32, final bool) error {
 	if emitErr := emit(ctx, c, event.KindToolCallFailed, event.ToolCallFailed{
 		CallID:     callID,
 		Error:      execErr.Error(),
 		ErrorType:  errType,
 		DurationMs: durMs,
 		Attempt:    attempt,
+		Final:      final,
 	}); emitErr != nil {
 		// errors.Join preserves both chains so errors.Is(err, ErrToolNotFound)
 		// (or any other sentinel inside execErr) still routes even when the

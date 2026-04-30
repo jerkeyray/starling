@@ -22,7 +22,8 @@ var (
 	// without the model producing a final answer.
 	ErrMaxTurnsExceeded = errors.New("starling: max turns exceeded")
 
-	// ErrNonDeterminism is reserved for M2's replay verifier.
+	// ErrNonDeterminism is returned by Replay when a re-emitted event
+	// diverges from the recording. Wraps replay.ErrNonDeterminism.
 	ErrNonDeterminism = errors.New("starling: non-determinism detected during replay")
 
 	// ErrRunNotFound is returned by Resume when the requested runID has

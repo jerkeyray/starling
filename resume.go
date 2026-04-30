@@ -158,7 +158,7 @@ func (a *Agent) ResumeWith(ctx context.Context, runID, extraMessage string, opts
 		AtSeq:        last.Seq,
 		ExtraMessage: extraMessage,
 		ReissueTools: cfg.reissueTools,
-		PendingCalls: len(state.PendingCalls),
+		PendingCalls: uint32(len(state.PendingCalls)),
 	}); err != nil {
 		if errors.Is(err, eventlog.ErrInvalidAppend) {
 			return nil, fmt.Errorf("%w: %v", ErrRunInUse, err)

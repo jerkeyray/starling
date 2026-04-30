@@ -291,7 +291,7 @@ func TestValidate_OpenTurnAtRunFailed_OK(t *testing.T) {
 	b := newBuilder("run-105")
 	b.add(t, event.KindRunStarted, event.RunStarted{SchemaVersion: event.SchemaVersion})
 	b.add(t, event.KindTurnStarted, event.TurnStarted{TurnID: "t1"})
-	evs := b.finishWith(t, event.KindRunFailed, event.RunFailed{Error: "boom", ErrorType: "internal"})
+	evs := b.finishWith(t, event.KindRunFailed, event.RunFailed{Error: "boom", ErrorType: event.RunErrorInternal})
 	if err := eventlog.Validate(evs); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}

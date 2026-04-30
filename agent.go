@@ -455,10 +455,10 @@ func (a *Agent) emitTerminal(ctx context.Context, sc *step.Context, runErr error
 		// Using durMs (already replay-stable) keeps live/replay
 		// byte-identical.
 		if err := stepEmit(ctx, sc, event.KindBudgetExceeded, event.BudgetExceeded{
-			Limit:  "wall_clock",
+			Limit:  event.LimitWallClock,
 			Cap:    float64(a.Budget.MaxWallClock.Milliseconds()),
 			Actual: float64(durMs),
-			Where:  "mid_stream",
+			Where:  event.WhereMidStream,
 		}); err != nil {
 			return 0, fmt.Errorf("emit BudgetExceeded(wall_clock): %w", err)
 		}
@@ -478,7 +478,7 @@ func (a *Agent) emitTerminal(ctx context.Context, sc *step.Context, runErr error
 		root = merkle.Root(hashes2)
 		return event.KindRunFailed, stepEmit(ctx, sc, event.KindRunFailed, event.RunFailed{
 			Error:      runErr.Error(),
-			ErrorType:  "budget",
+			ErrorType:  event.RunErrorBudget,
 			MerkleRoot: root,
 			DurationMs: durMs,
 		})
@@ -764,25 +764,25 @@ func terminalMetricErrorType(term event.Kind, runErr error) string {
 	if term == event.KindRunCompleted || term == event.KindRunCancelled {
 		return "none"
 	}
-	return classifyRunError(runErr)
+	return string(classifyRunError(runErr))
 }
 
-func classifyRunError(err error) string {
+func classifyRunError(err error) event.RunErrorType {
 	switch {
 	case errors.Is(err, ErrBudgetExceeded), errors.Is(err, step.ErrBudgetExceeded):
-		return "budget"
+		return event.RunErrorBudget
 	case errors.Is(err, ErrMaxTurnsExceeded):
-		return "max_turns"
+		return event.RunErrorMaxTurns
 	}
 	var toolErr *ToolError
 	if errors.As(err, &toolErr) {
-		return "tool"
+		return event.RunErrorTool
 	}
 	var provErr *ProviderError
 	if errors.As(err, &provErr) {
-		return "provider"
+		return event.RunErrorProvider
 	}
-	return "internal"
+	return event.RunErrorInternal
 }
 
 // ----------------------------------------------------------------------

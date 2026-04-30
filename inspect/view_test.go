@@ -134,7 +134,7 @@ func TestSummarize(t *testing.T) {
 		{"ToolCallScheduled", mk(event.KindToolCallScheduled, event.ToolCallScheduled{CallID: "c1", ToolName: "fetch"}), "tool=fetch call=c1", "c1"},
 		{"ToolCallCompleted", mk(event.KindToolCallCompleted, event.ToolCallCompleted{CallID: "c1", DurationMs: 42}), "call=c1 ok 42ms", "c1"},
 		{"ToolCallFailed", mk(event.KindToolCallFailed, event.ToolCallFailed{CallID: "c1", ErrorType: "timeout"}), "call=c1 err=timeout", "c1"},
-		{"BudgetExceeded", mk(event.KindBudgetExceeded, event.BudgetExceeded{Limit: "usd"}), "budget=usd", ""},
+		{"BudgetExceeded", mk(event.KindBudgetExceeded, event.BudgetExceeded{Limit: event.LimitUSD}), "budget=usd", ""},
 		{"RunCompleted", mk(event.KindRunCompleted, event.RunCompleted{TurnCount: 2, ToolCallCount: 3}), "turns=2 tools=3", ""},
 	}
 	for _, tc := range cases {

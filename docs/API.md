@@ -25,6 +25,7 @@ page does not re-list every field.
 | `starling/provider/openai`         | OpenAI Chat Completions + every OpenAI-compatible endpoint       |
 | `starling/provider/anthropic`      | Anthropic Messages adapter                                       |
 | `starling/provider/gemini`         | Google Gemini adapter (Gemini API backend; Vertex AI deferred)   |
+| `starling/provider/bedrock`        | Amazon Bedrock adapter (native `ConverseStream`, AWS SDK v2)     |
 | `starling/provider/openrouter`     | OpenRouter adapter (thin wrapper over `provider/openai`)         |
 | `starling/tool`                    | `Tool` interface, `Typed[In,Out]` reflective helper              |
 | `starling/tool/builtin`            | Small demo tool set (`Fetch`, `ReadFile`)                        |

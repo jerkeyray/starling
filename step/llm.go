@@ -52,10 +52,10 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 	est := estimateRequestTokens(req)
 	if cap := c.budgetCfg().MaxInputTokens; cap > 0 && est > cap {
 		if err := emit(ctx, c, event.KindBudgetExceeded, event.BudgetExceeded{
-			Limit:  "input_tokens",
+			Limit:  event.LimitInputTokens,
 			Cap:    float64(cap),
 			Actual: float64(est),
-			Where:  "pre_call",
+			Where:  event.WherePreCall,
 		}); err != nil {
 			return nil, fmt.Errorf("step.LLMCall: emit BudgetExceeded: %w", err)
 		}
@@ -242,7 +242,7 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 						Limit:         limit,
 						Cap:           cap,
 						Actual:        actual,
-						Where:         "mid_stream",
+						Where:         event.WhereMidStream,
 						TurnID:        turnID,
 						PartialText:   textBuf.String(),
 						PartialTokens: usage.OutputTokens,
@@ -250,7 +250,7 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 						return nil, fmt.Errorf("step.LLMCall: emit BudgetExceeded: %w", err)
 					}
 					if c.metrics != nil {
-						c.metrics.ObserveBudgetExceeded(limit)
+						c.metrics.ObserveBudgetExceeded(string(limit))
 					}
 					c.logger.Warn("budget exceeded",
 						obs.AttrLimit, limit,

@@ -62,7 +62,7 @@ func TestAs_SuccessEachKind(t *testing.T) {
 	tcc := event.ToolCallCompleted{CallID: "c1", Result: emptyMap, DurationMs: 1, Attempt: 1}
 	tcf := event.ToolCallFailed{CallID: "c1", Error: "e", ErrorType: "timeout", DurationMs: 1, Attempt: 1}
 	se := event.SideEffectRecorded{Name: "now", Value: mustRaw(t, int64(1700000000))}
-	be := event.BudgetExceeded{Limit: "usd", Cap: 0.1, Actual: 0.2, Where: "pre_call"}
+	be := event.BudgetExceeded{Limit: event.LimitUSD, Cap: 0.1, Actual: 0.2, Where: event.WherePreCall}
 	ct := event.ContextTruncated{Strategy: "drop_oldest", TokensBefore: 10, TokensAfter: 5, MessagesBefore: 4, MessagesAfter: 2}
 	rc := event.RunCompleted{FinalText: "done", TurnCount: 1, ToolCallCount: 0, TotalCostUSD: 0.01, TotalInputTokens: 1, TotalOutputTokens: 1, DurationMs: 10, MerkleRoot: []byte{7}}
 	rf := event.RunFailed{Error: "e", ErrorType: "x", MerkleRoot: []byte{8}, DurationMs: 10}

@@ -8,17 +8,13 @@ import (
 	"github.com/jerkeyray/starling/internal/cborenc"
 )
 
-// SchemaVersion is the current event-log wire-format version. It is recorded
-// in every RunStarted event; a replayer refuses logs whose schema version it
-// does not understand.
+// SchemaVersion is the current event-log wire-format version. Recorded in
+// every RunStarted; replayers refuse logs with an unknown version.
 const SchemaVersion uint32 = 1
 
-// Event is the envelope every entry in a per-run hash chain shares.
-//
-// The envelope is intentionally small and payload-agnostic. The Payload field
-// holds canonical CBOR bytes of a typed payload struct (see types.go); the
-// matching Kind tells callers which type to decode into. Accessor methods on
-// Event (AsRunStarted, AsToolCallCompleted, …) combine that check and decode.
+// Event is the envelope shared by every entry in a per-run hash chain.
+// Payload holds canonical CBOR for the typed struct named by Kind; use the
+// AsXxx accessors to decode it.
 type Event struct {
 	RunID     string             `cbor:"run_id"`
 	Seq       uint64             `cbor:"seq"`
@@ -47,11 +43,10 @@ const (
 	KindRunFailed                 Kind = 13
 	KindRunCancelled              Kind = 14
 	KindRunResumed                Kind = 15
-	// 16 reserved for KindTurnFailed.
 )
 
-// String returns the canonical name of k. Unknown kinds render as
-// "Kind(<n>)" so log dumps remain readable.
+// String returns the canonical name of k, or "Kind(<n>)" for unknown values
+// so log dumps stay readable.
 func (k Kind) String() string {
 	switch k {
 	case KindRunStarted:
@@ -88,7 +83,7 @@ func (k Kind) String() string {
 	return fmt.Sprintf("Kind(%d)", uint8(k))
 }
 
-// IsTerminal reports whether k ends a run (RunCompleted, RunFailed, RunCancelled).
+// IsTerminal reports whether k ends a run.
 func (k Kind) IsTerminal() bool {
 	switch k {
 	case KindRunCompleted, KindRunFailed, KindRunCancelled:

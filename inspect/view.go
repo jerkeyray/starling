@@ -217,7 +217,7 @@ func summarize(ev event.Event) (summary, callID string) {
 		}
 	case event.KindBudgetExceeded:
 		if p, err := ev.AsBudgetExceeded(); err == nil {
-			return "budget=" + p.Limit, ""
+			return "budget=" + string(p.Limit), ""
 		}
 	case event.KindContextTruncated:
 		return "context truncated", ""
@@ -227,7 +227,7 @@ func summarize(ev event.Event) (summary, callID string) {
 		}
 	case event.KindRunFailed:
 		if p, err := ev.AsRunFailed(); err == nil {
-			return p.ErrorType + ": " + truncOneLine(p.Error, 60), ""
+			return string(p.ErrorType) + ": " + truncOneLine(p.Error, 60), ""
 		}
 	case event.KindRunCancelled:
 		if p, err := ev.AsRunCancelled(); err == nil {

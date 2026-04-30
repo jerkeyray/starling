@@ -28,7 +28,7 @@ see exactly where today's behavior diverges from the original recording.
 | Portable replay | Deterministic re-execution from the recorded log, including MCP tool side effects. |
 | Audit evidence | Hash-chained events and Merkle roots suitable for retention, review, and incident timelines. |
 | Cost control | Token, USD, and wall-clock budgets enforced inside the runtime, not just observed after the fact. |
-| Provider choice | OpenAI-compatible, Anthropic, Gemini, OpenRouter, and local/open model backends. |
+| Provider choice | OpenAI-compatible, Anthropic, Gemini, Amazon Bedrock, OpenRouter, and local/open model backends. |
 | Operational visibility | Metrics hooks, structured divergence logs, and an embedded inspector UI. |
 
 ## Features
@@ -38,8 +38,8 @@ see exactly where today's behavior diverges from the original recording.
   model or re-running recorded side effects.
 - **Durable event logs**: in-memory, SQLite, and Postgres backends with schema
   migration and validation helpers.
-- **Provider adapters**: OpenAI-compatible APIs, Anthropic, Gemini, and
-  OpenRouter.
+- **Provider adapters**: OpenAI-compatible APIs, Anthropic, Gemini, Amazon
+  Bedrock, and OpenRouter.
 - **MCP tools**: stdio subprocess and streamable HTTP clients backed by the
   official Go MCP SDK.
 - **Tool safety**: retries, transient error classification, typed tool errors,
