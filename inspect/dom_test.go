@@ -12,8 +12,7 @@ import (
 // DOM-level checks against the rendered HTML. Cheaper than a real
 // browser but enough to catch template regressions in the runs list,
 // run detail, and replay shells. A full headless-browser suite (Chrome
-// via chromedp) is out of scope until we have CI infrastructure for
-// it — see docs/INSPECT.md § Production mode.
+// via chromedp) is out of scope until we have CI infrastructure for it.
 
 func TestDOM_RunsPage_HasSearchInput(t *testing.T) {
 	hs, _ := authServer(t)

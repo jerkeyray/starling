@@ -125,8 +125,7 @@ defer log.Close()
 ```
 
 Durable backends support schema preflight checks, migrations, validation, and
-retention workflows. See [docs/EVENTS.md](docs/EVENTS.md) and
-[docs/RETENTION.md](docs/RETENTION.md).
+retention workflows.
 
 ## Replay And Resume
 
@@ -159,8 +158,7 @@ next, err := a.Resume(ctx, runID, "Continue with remediation steps.")
 | OpenRouter | `provider/openrouter` | OpenRouter-specific convenience wrapper over the OpenAI-compatible path. |
 
 Provider behavior is covered by a conformance suite so adapters share the same
-streaming, usage, tool-call, and error contracts. See
-[docs/PROVIDER_SUPPORT.md](docs/PROVIDER_SUPPORT.md).
+streaming, usage, tool-call, and error contracts.
 
 ## MCP Tools
 
@@ -257,8 +255,6 @@ Go server with no CDN or JavaScript build step.
 - Use replay regression tests for critical agent workflows.
 - Store raw provider responses only when your privacy and retention policy
   allows it.
-- Review [docs/SECURITY.md](docs/SECURITY.md) and
-  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) before production use.
 
 ## Examples
 
@@ -268,23 +264,6 @@ Go server with no CDN or JavaScript build step.
 | [examples/incident_triage](examples/incident_triage) | End-to-end production-style workflow with budgets, replay, resume, metrics, OTel, and durable logs. |
 | [examples/mcp_tools](examples/mcp_tools) | MCP server tools adapted into Starling tools. |
 | [examples/m4_inspector_demo](examples/m4_inspector_demo) | Local run data for the inspector. |
-
-## Documentation
-
-| Document | Purpose |
-| --- | --- |
-| [docs/API.md](docs/API.md) | Public package layout and core APIs. |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Runtime architecture and data flow. |
-| [docs/EVENTS.md](docs/EVENTS.md) | Event schema, validation rules, and migration notes. |
-| [docs/REPLAY.md](docs/REPLAY.md) | Replay semantics and determinism rules. |
-| [docs/REPLAY_DEBUGGING.md](docs/REPLAY_DEBUGGING.md) | Debugging failed runs with replay and inspector workflows. |
-| [docs/PROVIDER_SUPPORT.md](docs/PROVIDER_SUPPORT.md) | Provider feature matrix and adapter notes. |
-| [docs/INSPECT.md](docs/INSPECT.md) | Inspector usage, flags, and security model. |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Runtime deployment guidance. |
-| [docs/SECURITY.md](docs/SECURITY.md) | Security model and operator responsibilities. |
-| [docs/RETENTION.md](docs/RETENTION.md) | Event retention and privacy guidance. |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Design decisions and tradeoffs. |
-| [docs/PERF_TUNING.md](docs/PERF_TUNING.md) | Performance tuning notes and benchmarks. |
 
 ## Development
 

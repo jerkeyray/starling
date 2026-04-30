@@ -81,7 +81,7 @@ tool edits.
 ## Metrics
 
 When `METRICS_ADDR` is set, the example serves Prometheus metrics on
-that address. The full set is documented in [docs/METRICS.md](../../docs/METRICS.md).
+that address.
 
 ```sh
 METRICS_ADDR=:9090 go run ./examples/incident_triage run

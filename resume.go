@@ -52,8 +52,7 @@ func WithReissueTools(b bool) ResumeOption {
 //   - ErrRunInUse: chain advanced between tail read and first append.
 //
 // Budget: MaxWallClock and step-level token/USD caps reset at the
-// process boundary; MaxTurns counts across the whole run. See
-// docs/RESUME.md.
+// process boundary; MaxTurns counts across the whole run.
 func (a *Agent) Resume(ctx context.Context, runID, extraMessage string) (*RunResult, error) {
 	return a.ResumeWith(ctx, runID, extraMessage)
 }

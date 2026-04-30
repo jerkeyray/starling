@@ -53,7 +53,7 @@ touched — `-count=1` has masked real races in this repo before.
 
 ## What's out of scope
 
-See `temp_docs/ROADMAP.md` §6 for the non-goals list. Prompt DSLs,
-vector stores, chain/flow DSLs, HTTP wrappers, and retry policies in
-core are all explicit non-goals — PRs adding them will be closed.
+Prompt DSLs, vector stores, chain/flow DSLs, HTTP wrappers, and retry
+policies in core are all explicit non-goals — PRs adding them will be
+closed.
 
