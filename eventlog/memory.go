@@ -106,6 +106,11 @@ func (m *memoryLog) Append(ctx context.Context, runID string, ev event.Event) er
 			kept = append(kept, sub)
 		default:
 			sub.close()
+			// Dropped slow subscribers are a safety-critical signal
+			// and are always logged via slog.Default(), regardless of
+			// Config.Logger. The event log runs decoupled from any
+			// agent's run-scoped logger. Documented in Config.Logger
+			// godoc.
 			slog.Default().LogAttrs(ctx, slog.LevelWarn,
 				"eventlog: dropped slow stream subscriber",
 				slog.String("run_id", runID),

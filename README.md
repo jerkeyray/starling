@@ -47,7 +47,8 @@ see exactly where today's behavior diverges from the original recording.
 - **Inspector**: dependency-free browser UI for exploring runs and replay
   divergence.
 - **Observability**: metrics wrappers, OpenTelemetry-friendly examples, and
-  structured `slog` output.
+  opt-in structured `slog` output (silent by default; pass
+  `Config.Logger = slog.New(...)` to enable).
 
 ## Install
 

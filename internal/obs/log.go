@@ -38,12 +38,13 @@ func Discard() *slog.Logger {
 }
 
 // Resolve picks the logger to use for a run. If user is non-nil it is
-// returned as-is; otherwise slog.Default() is returned so library
-// output follows the process-wide default handler without any
-// explicit wiring. Callers wanting silence should pass Discard().
+// returned as-is; otherwise Discard() is returned so library output is
+// silent by default. Callers that want library logs must pass an
+// explicit *slog.Logger (e.g. slog.Default() to inherit the
+// process-wide handler).
 func Resolve(user *slog.Logger) *slog.Logger {
 	if user != nil {
 		return user
 	}
-	return slog.Default()
+	return Discard()
 }

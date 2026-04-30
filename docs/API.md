@@ -119,6 +119,29 @@ Label cardinality is bounded by the caller's static config (model,
 tool name, closed-enum statuses); nothing user-controlled per request
 can inflate series count.
 
+### 2.4a Logging
+
+`Config.Logger` is the side-channel slog trace for operators watching
+live runs. The event log (§4) is the source of truth for auditing.
+
+- `nil` (default) — silent. Library output is discarded.
+- Pass a `*slog.Logger` to enable runtime logs. Level filtering is
+  delegated to your handler's `slog.HandlerOptions.Level`.
+
+```go
+// Warn-only production trace.
+cfg.Logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+    Level: slog.LevelWarn,
+}))
+
+// Inherit the process-wide handler (previous default behavior).
+cfg.Logger = slog.Default()
+```
+
+**Always-on exceptions** (logged via `slog.Default()` regardless of
+`Config.Logger`): replay divergences and dropped event-log subscribers.
+These are safety-critical signals routed outside the run-scoped logger.
+
 ### 2.5 CLI helper commands
 
 Every subcommand of the stock `cmd/starling` binary is also exposed as

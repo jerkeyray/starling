@@ -105,6 +105,9 @@ func Verify(ctx context.Context, log eventlog.EventLog, runID string, a Agent) e
 	}
 	if err := a.RunReplay(ctx, recorded); err != nil {
 		if d := asDivergence(runID, err); d != nil {
+			// Replay divergence is a safety-critical signal and is
+			// always logged via slog.Default(), regardless of
+			// Config.Logger. Documented in Config.Logger godoc.
 			slog.Default().LogAttrs(ctx, slog.LevelError, "replay divergence", d.LogAttrs()...)
 			return fmt.Errorf("%w: %w", ErrNonDeterminism, d)
 		}

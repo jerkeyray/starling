@@ -96,9 +96,11 @@ certs; treat the proxy decision as authoritative.
 | `STARLING_INSPECT_TOKEN` | Env var | Rotate on operator changes. |
 | Postgres DSN | Env var (e.g. `DATABASE_URL`) | Use a role with minimum required privileges (`SELECT, INSERT` for the writer; `SELECT` only for the inspector). |
 
-Keys leak through logs more than anywhere else. The default `Logger`
-(slog) does not redact provider request payloads — keep API keys in
-HTTP headers (where adapters put them) and out of `Config.Params`.
+Keys leak through logs more than anywhere else. `Config.Logger` is
+silent by default (nil → discard); when you opt in by passing a
+`*slog.Logger`, Starling does not redact provider request payloads —
+keep API keys in HTTP headers (where adapters put them) and out of
+`Config.Params`.
 
 ## Sensitive event payloads
 

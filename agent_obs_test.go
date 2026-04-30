@@ -123,6 +123,53 @@ func TestAgent_Logger_FailedRunIsErrorLevel(t *testing.T) {
 	}
 }
 
+// TestAgent_Logger_NilIsSilent pins the silent-by-default contract:
+// Config.Logger == nil must produce zero slog records, even when
+// slog.Default() is configured to capture everything. The event log
+// remains the source of truth for run state and is unaffected.
+func TestAgent_Logger_NilIsSilent(t *testing.T) {
+	var buf bytes.Buffer
+	prevDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prevDefault)
+
+	p := &cannedProvider{scripts: [][]provider.StreamChunk{{
+		{Kind: provider.ChunkText, Text: "hi"},
+		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+		{Kind: provider.ChunkEnd, StopReason: "stop"},
+	}}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+
+	a := &starling.Agent{
+		Provider: p,
+		Log:      log,
+		Config:   starling.Config{Model: "m", MaxTurns: 2},
+	}
+	res, err := a.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if buf.Len() != 0 {
+		t.Fatalf("nil logger leaked %d bytes to slog.Default():\n%s", buf.Len(), buf.String())
+	}
+
+	evs, err := log.Read(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(evs) == 0 {
+		t.Fatal("event log empty; expected RunStarted...RunCompleted regardless of Logger")
+	}
+	if evs[0].Kind != event.KindRunStarted {
+		t.Fatalf("first event = %s, want RunStarted", evs[0].Kind)
+	}
+	if last := evs[len(evs)-1]; last.Kind != event.KindRunCompleted {
+		t.Fatalf("last event = %s, want RunCompleted", last.Kind)
+	}
+}
+
 // TestAgent_OTel_SpanTree verifies the span shape produced by a
 // successful run: agent.run > agent.turn > agent.llm_call. Uses
 // OTel's in-memory exporter so no external collector is required.

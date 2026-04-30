@@ -56,9 +56,14 @@ type Config struct {
 	// and per-tool records add "turn_id" / "call_id".
 	//
 	// The event log remains the source of truth for auditing — Logger is
-	// a side-channel trace for operators watching live runs. If nil, the
-	// process-wide slog.Default() is used; pass a discard logger to
-	// silence library output entirely.
+	// a side-channel trace for operators watching live runs. Nil is
+	// silent: library output is discarded. Pass slog.New(...) (or
+	// slog.Default()) to enable logs; level filtering is delegated to
+	// the supplied handler's slog.HandlerOptions.Level.
+	//
+	// Exceptions: replay divergences and dropped event-log subscribers
+	// are safety-critical signals and are always logged via
+	// slog.Default(), regardless of this field.
 	Logger *slog.Logger
 }
 

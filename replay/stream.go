@@ -200,6 +200,9 @@ func emitFinalDivergence(
 		div = asDivergence(runID, runErr)
 		if div != nil {
 			reason = div.Reason
+			// Replay divergence is a safety-critical signal and is
+			// always logged via slog.Default(), regardless of
+			// Config.Logger. Documented in Config.Logger godoc.
 			slog.Default().LogAttrs(ctx, slog.LevelError, "replay divergence", div.LogAttrs()...)
 		} else if errors.Is(runErr, step.ErrReplayMismatch) {
 			reason = runErr.Error()

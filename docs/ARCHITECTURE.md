@@ -290,7 +290,10 @@ Three layers exist side by side:
 1. Event log
    The canonical audit trail.
 2. `log/slog`
-   Side-channel operational trace via `Config.Logger`.
+   Side-channel operational trace via `Config.Logger`. Opt-in: nil is
+   silent; pass `slog.New(...)` to enable. Replay divergences and
+   dropped event-log subscribers are always logged via `slog.Default()`
+   regardless.
 3. OpenTelemetry
    Spans around run / turn / LLM / tool boundaries.
 
