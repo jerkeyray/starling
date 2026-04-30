@@ -236,7 +236,7 @@ func (s *sqliteLog) Append(ctx context.Context, runID string, ev event.Event) er
 	if err != nil {
 		return fmt.Errorf("eventlog/sqlite: read last: %w", err)
 	}
-	if err := validateAppend(last, ev); err != nil {
+	if err := validateAppend(runID, last, ev); err != nil {
 		return err
 	}
 

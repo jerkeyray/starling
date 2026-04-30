@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jerkeyray/starling/eventlog"
+	"github.com/jerkeyray/starling/provider"
 )
 
 // Sentinel errors surfaced by Agent.Run. Tests and callers route on
@@ -83,21 +84,8 @@ func (e *ToolError) Unwrap() error { return e.Err }
 // failure, mid-stream error). Provider is the provider ID
 // (e.g. "openai"); Code carries an HTTP status if the adapter
 // surfaced one, 0 otherwise.
-type ProviderError struct {
-	Provider string
-	Code     int
-	Err      error
-}
-
-// Error implements the error interface, including the provider ID and
-// HTTP status code (when non-zero).
-func (e *ProviderError) Error() string {
-	if e.Code != 0 {
-		return fmt.Sprintf("starling: provider %q (status %d): %v", e.Provider, e.Code, e.Err)
-	}
-	return fmt.Sprintf("starling: provider %q: %v", e.Provider, e.Err)
-}
-
-// Unwrap returns the underlying provider error so callers can route on
-// it with errors.Is / errors.As.
-func (e *ProviderError) Unwrap() error { return e.Err }
+//
+// Aliased to provider.Error so the step package (which the root cannot
+// import without cycles) can construct it directly. Callers that route
+// on *starling.ProviderError continue to work via errors.As.
+type ProviderError = provider.Error

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sort"
 	"strings"
 	"testing"
 
 	starling "github.com/jerkeyray/starling"
+	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
 
@@ -194,7 +196,86 @@ func TestAgent_OTel_SpanTree(t *testing.T) {
 	}
 }
 
+// TestAgent_ProviderStreamOpenError_ClassifiedAsProvider pins that an
+// error returned from Provider.Stream surfaces as RunFailed{provider}
+// and that the returned error wraps *starling.ProviderError so callers
+// can route on it with errors.As.
+func TestAgent_ProviderStreamOpenError_ClassifiedAsProvider(t *testing.T) {
+	log := eventlog.NewInMemory()
+	defer log.Close()
+	a := &starling.Agent{
+		Provider: &openErrProvider{},
+		Log:      log,
+		Config:   starling.Config{Model: "m", MaxTurns: 2},
+	}
+	res, err := a.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("want error from Run")
+	}
+	var pe *starling.ProviderError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v (%T), want errors.As to *starling.ProviderError", err, err)
+	}
+	if pe.Provider != "open-err" {
+		t.Errorf("ProviderError.Provider = %q, want open-err", pe.Provider)
+	}
+	if res == nil || res.RunID == "" {
+		t.Fatal("Run returned nil result despite terminal emission")
+	}
+	evs, _ := log.Read(context.Background(), res.RunID)
+	last := evs[len(evs)-1]
+	if last.Kind != event.KindRunFailed {
+		t.Fatalf("last event = %s, want RunFailed", last.Kind)
+	}
+	rf, _ := last.AsRunFailed()
+	if rf.ErrorType != "provider" {
+		t.Fatalf("RunFailed.ErrorType = %q, want provider", rf.ErrorType)
+	}
+}
+
+// TestAgent_ProviderStreamMidDrainError_ClassifiedAsProvider pins the
+// same contract for an error returned mid-drain from EventStream.Next.
+func TestAgent_ProviderStreamMidDrainError_ClassifiedAsProvider(t *testing.T) {
+	log := eventlog.NewInMemory()
+	defer log.Close()
+	a := &starling.Agent{
+		Provider: &errProvider{},
+		Log:      log,
+		Config:   starling.Config{Model: "m", MaxTurns: 2},
+	}
+	res, err := a.Run(context.Background(), "go")
+	if err == nil {
+		t.Fatal("want error from Run")
+	}
+	var pe *starling.ProviderError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v (%T), want errors.As to *starling.ProviderError", err, err)
+	}
+	if pe.Provider != "err" {
+		t.Errorf("ProviderError.Provider = %q, want err", pe.Provider)
+	}
+	evs, _ := log.Read(context.Background(), res.RunID)
+	last := evs[len(evs)-1]
+	if last.Kind != event.KindRunFailed {
+		t.Fatalf("last event = %s, want RunFailed", last.Kind)
+	}
+	rf, _ := last.AsRunFailed()
+	if rf.ErrorType != "provider" {
+		t.Fatalf("RunFailed.ErrorType = %q, want provider", rf.ErrorType)
+	}
+}
+
 // ---- helpers -------------------------------------------------------------
+
+// openErrProvider returns an error from Stream itself (the open path).
+type openErrProvider struct{}
+
+func (openErrProvider) Info() provider.Info {
+	return provider.Info{ID: "open-err", APIVersion: "v0"}
+}
+func (openErrProvider) Stream(_ context.Context, _ *provider.Request) (provider.EventStream, error) {
+	return nil, errors.New("synthetic open failure")
+}
 
 type errProvider struct{}
 

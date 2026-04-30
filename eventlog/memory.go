@@ -92,7 +92,7 @@ func (m *memoryLog) Append(ctx context.Context, runID string, ev event.Event) er
 	if n := len(rs.events); n > 0 {
 		last = &rs.events[n-1]
 	}
-	if err := validateAppend(last, ev); err != nil {
+	if err := validateAppend(runID, last, ev); err != nil {
 		return err
 	}
 
@@ -120,9 +120,23 @@ func (m *memoryLog) Append(ctx context.Context, runID string, ev event.Event) er
 
 // validateAppend checks that ev is a valid next event after last.
 // A nil last means ev must be the first event of a run. Shared
-// between the in-memory and SQLite backends so both enforce identical
-// chain invariants.
-func validateAppend(last *event.Event, ev event.Event) error {
+// between the in-memory, SQLite, and Postgres backends so all three
+// enforce identical chain invariants.
+//
+// runID is the run key the caller addressed; ev.RunID is what the
+// event carries. Memory keys storage by the parameter while SQL
+// backends bind ev.RunID, so a mismatch silently splits a run's
+// history; we reject up front.
+func validateAppend(runID string, last *event.Event, ev event.Event) error {
+	if runID == "" {
+		return fmt.Errorf("%w: empty runID parameter", ErrInvalidAppend)
+	}
+	if ev.RunID == "" {
+		return fmt.Errorf("%w: event has empty RunID", ErrInvalidAppend)
+	}
+	if runID != ev.RunID {
+		return fmt.Errorf("%w: runID parameter %q does not match event RunID %q", ErrInvalidAppend, runID, ev.RunID)
+	}
 	if last == nil {
 		if ev.Seq != 1 {
 			return fmt.Errorf("%w: first event must have Seq=1, got %d", ErrInvalidAppend, ev.Seq)

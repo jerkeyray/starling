@@ -154,6 +154,7 @@ next, err := a.Resume(ctx, runID, "Continue with remediation steps.")
 | OpenAI-compatible | `provider/openai` | OpenAI, Groq, Together, Ollama, vLLM, LM Studio, Azure OpenAI, and compatible APIs via custom `BaseURL`. |
 | Anthropic | `provider/anthropic` | Messages API support, tool use, thinking/signatures, and prompt caching metadata. |
 | Gemini | `provider/gemini` | Native Gemini adapter for Google models. |
+| Amazon Bedrock | `provider/bedrock` | Native Bedrock ConverseStream adapter with AWS SDK auth, tool use, reasoning, and cache-aware usage. |
 | OpenRouter | `provider/openrouter` | OpenRouter-specific convenience wrapper over the OpenAI-compatible path. |
 
 Provider behavior is covered by a conformance suite so adapters share the same

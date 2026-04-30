@@ -38,8 +38,11 @@ type RunSummary struct {
 // and PrevHash before calling Append; the log validates but does not assign.
 type EventLog interface {
 	// Append validates and stores ev as the next event in runID's chain.
-	// Returns an error wrapping ErrInvalidAppend on invariant violation, or
-	// ErrLogClosed if the log has been closed.
+	// runID and ev.RunID must both be non-empty and equal: backends
+	// disagree on which they index by (memory uses the parameter, SQL
+	// backends bind ev.RunID), so mismatched values are rejected up
+	// front. Returns an error wrapping ErrInvalidAppend on invariant
+	// violation, or ErrLogClosed if the log has been closed.
 	Append(ctx context.Context, runID string, ev event.Event) error
 
 	// Read returns every event stored for runID, in sequence order.

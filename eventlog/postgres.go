@@ -260,7 +260,7 @@ func (p *postgresLog) Append(ctx context.Context, runID string, ev event.Event) 
 	if err != nil {
 		return fmt.Errorf("eventlog/postgres: read last: %w", err)
 	}
-	if err := validateAppend(last, ev); err != nil {
+	if err := validateAppend(runID, last, ev); err != nil {
 		return err
 	}
 

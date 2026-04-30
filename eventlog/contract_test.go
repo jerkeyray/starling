@@ -269,6 +269,61 @@ func TestContract_Append_PrevHashMustMatchPrevEvent(t *testing.T) {
 	}
 }
 
+func TestContract_Append_RejectsRunIDMismatch(t *testing.T) {
+	for _, bk := range backends(t) {
+		t.Run(bk.name, func(t *testing.T) {
+			log := bk.open(t)
+			payload, _ := event.EncodePayload(event.RunStarted{
+				SchemaVersion: event.SchemaVersion,
+				Goal:          "x",
+				ProviderID:    "test",
+				ModelID:       "test",
+			})
+			ev := event.Event{
+				RunID: "run-b", Seq: 1,
+				Kind:    event.KindRunStarted,
+				Payload: payload,
+			}
+			err := log.Append(context.Background(), "run-a", ev)
+			if !errors.Is(err, eventlog.ErrInvalidAppend) {
+				t.Fatalf("want ErrInvalidAppend for runID mismatch, got %v", err)
+			}
+		})
+	}
+}
+
+func TestContract_Append_RejectsEmptyRunID(t *testing.T) {
+	mkEv := func(runID string) event.Event {
+		payload, _ := event.EncodePayload(event.RunStarted{
+			SchemaVersion: event.SchemaVersion,
+			Goal:          "x",
+			ProviderID:    "test",
+			ModelID:       "test",
+		})
+		return event.Event{
+			RunID: runID, Seq: 1,
+			Kind:    event.KindRunStarted,
+			Payload: payload,
+		}
+	}
+	for _, bk := range backends(t) {
+		t.Run(bk.name+"/empty_param", func(t *testing.T) {
+			log := bk.open(t)
+			err := log.Append(context.Background(), "", mkEv("r1"))
+			if !errors.Is(err, eventlog.ErrInvalidAppend) {
+				t.Fatalf("want ErrInvalidAppend for empty runID param, got %v", err)
+			}
+		})
+		t.Run(bk.name+"/empty_event_runid", func(t *testing.T) {
+			log := bk.open(t)
+			err := log.Append(context.Background(), "r1", mkEv(""))
+			if !errors.Is(err, eventlog.ErrInvalidAppend) {
+				t.Fatalf("want ErrInvalidAppend for empty ev.RunID, got %v", err)
+			}
+		})
+	}
+}
+
 func TestContract_Append_HappyPath(t *testing.T) {
 	for _, bk := range backends(t) {
 		t.Run(bk.name, func(t *testing.T) {

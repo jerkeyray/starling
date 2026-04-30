@@ -394,6 +394,13 @@ func reconstructState(events []event.Event) (*resumeState, error) {
 			if err != nil {
 				return nil, fmt.Errorf("decode ToolCallCompleted at seq=%d: %w", ev.Seq, err)
 			}
+			// Result is stored as canonical CBOR; convert back to JSON
+			// so provider.ToolResult.Content carries the same shape the
+			// live agent path emits (json.RawMessage from the tool).
+			resultJSON, err := cborToJSON(p.Result)
+			if err != nil {
+				return nil, fmt.Errorf("convert ToolCallCompleted.Result to JSON at seq=%d: %w", ev.Seq, err)
+			}
 			// Drop from pending / current-turn maps and append a tool
 			// message so the upcoming LLMCall sees the completed call.
 			if _, ok := pendingByID[p.CallID]; ok {
@@ -406,7 +413,7 @@ func reconstructState(events []event.Event) (*resumeState, error) {
 				Role: provider.RoleTool,
 				ToolResult: &provider.ToolResult{
 					CallID:  p.CallID,
-					Content: string(p.Result),
+					Content: string(resultJSON),
 				},
 			})
 

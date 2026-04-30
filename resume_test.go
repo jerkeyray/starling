@@ -2,7 +2,10 @@ package starling_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -360,6 +363,93 @@ func TestResume_PendingToolCallRefuse(t *testing.T) {
 		if ev.Kind == event.KindRunResumed {
 			t.Fatalf("ResumeWith(false) should not have emitted RunResumed; found one at seq=%d", ev.Seq)
 		}
+	}
+}
+
+// capturingProvider wraps a script and records the Request passed to
+// Stream. Used to inspect what conversation history a resumed run
+// hands to the next provider call.
+type capturingProvider struct {
+	scripts [][]provider.StreamChunk
+	i       int
+	got     []*provider.Request
+}
+
+func (p *capturingProvider) Info() provider.Info {
+	return provider.Info{ID: "capturing", APIVersion: "v0"}
+}
+
+func (p *capturingProvider) Stream(_ context.Context, req *provider.Request) (provider.EventStream, error) {
+	p.got = append(p.got, req)
+	if p.i >= len(p.scripts) {
+		return nil, io.EOF
+	}
+	s := &cannedStream{chunks: p.scripts[p.i]}
+	p.i++
+	return s, nil
+}
+
+// TestResume_AfterToolCompleted_DecodesResultAsJSON verifies that the
+// tool message rebuilt from a recorded ToolCallCompleted event carries
+// JSON in Content (matching the live agent path), not the raw CBOR
+// bytes the event stores. See resume.go's KindToolCallCompleted arm.
+func TestResume_AfterToolCompleted_DecodesResultAsJSON(t *testing.T) {
+	scripts := [][]provider.StreamChunk{
+		{
+			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
+			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"ping"}`}},
+			{Kind: provider.ChunkToolUseEnd, ToolUse: &provider.ToolUseChunk{CallID: "c1"}},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 10, OutputTokens: 5}},
+			{Kind: provider.ChunkEnd, StopReason: "tool_use"},
+		},
+	}
+	cfg := starling.Config{Model: "gpt-4o-mini", MaxTurns: 4}
+
+	// Run all 6 events of turn 1: RunStarted, TurnStarted, Assistant,
+	// Scheduled, Completed, then crash before the next TurnStarted.
+	log, runID := recordThenCrash(t, cfg, []tool.Tool{echoTool()}, "do it", scripts, 6)
+
+	cap := &capturingProvider{scripts: [][]provider.StreamChunk{
+		{
+			{Kind: provider.ChunkText, Text: "ok"},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+			{Kind: provider.ChunkEnd, StopReason: "stop"},
+		},
+	}}
+	a := &starling.Agent{
+		Provider: cap,
+		Tools:    []tool.Tool{echoTool()},
+		Log:      log,
+		Config:   cfg,
+	}
+	if _, err := a.Resume(context.Background(), runID, ""); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if len(cap.got) == 0 {
+		t.Fatalf("no captured Stream call on resume")
+	}
+
+	// Find the tool-result message handed to the resumed provider.
+	var toolMsg *provider.Message
+	for i := range cap.got[0].Messages {
+		m := &cap.got[0].Messages[i]
+		if m.Role == provider.RoleTool && m.ToolResult != nil && m.ToolResult.CallID == "c1" {
+			toolMsg = m
+			break
+		}
+	}
+	if toolMsg == nil {
+		t.Fatalf("captured request has no tool result for c1: %+v", cap.got[0].Messages)
+	}
+
+	// Content must parse as JSON and equal the original tool output.
+	var got map[string]any
+	if err := json.Unmarshal([]byte(toolMsg.ToolResult.Content), &got); err != nil {
+		t.Fatalf("tool result Content is not valid JSON: %q (err %v)", toolMsg.ToolResult.Content, err)
+	}
+	want := map[string]any{"got": "ping"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("tool result mismatch: got %v, want %v", got, want)
 	}
 }
 

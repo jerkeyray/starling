@@ -117,6 +117,7 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 		)
 	}()
 	if err != nil {
+		err = wrapProviderErr(p, err)
 		return nil, err
 	}
 	defer stream.Close()
@@ -166,7 +167,7 @@ func LLMCall(ctx context.Context, req *provider.Request) (resp *provider.Respons
 				}
 				break
 			}
-			return nil, nerr
+			return nil, wrapProviderErr(p, nerr)
 		}
 		if streamEnded {
 			return nil, fmt.Errorf("%w: chunk %v received after ChunkEnd", ErrInvalidStream, chunk.Kind)
@@ -395,6 +396,22 @@ func normalizeJSONNumbers(v any) any {
 	default:
 		return v
 	}
+}
+
+// wrapProviderErr tags an error returned by p.Stream / EventStream.Next
+// with the provider ID so the agent's classifyRunError surfaces it as
+// RunFailed{ErrorType:"provider"} instead of "internal". Pass-through
+// for nil and for errors that already wrap *provider.Error so adapters
+// that learn to extract HTTP status later compose without re-wrapping.
+func wrapProviderErr(p provider.Provider, err error) error {
+	if err == nil {
+		return nil
+	}
+	var pe *provider.Error
+	if errors.As(err, &pe) {
+		return err
+	}
+	return &provider.Error{Provider: p.Info().ID, Err: err}
 }
 
 // providerCallStatus maps the result of an LLMCall into the
