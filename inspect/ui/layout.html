@@ -5,14 +5,47 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{{.Title}} · starling-inspect</title>
   <link rel="stylesheet" href="/static/app.css">
+  <script>
+    // Apply persisted theme before paint to avoid a flash. Falls
+    // through to prefers-color-scheme when nothing is stored.
+    (function() {
+      try {
+        var t = localStorage.getItem("starling.theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">
-    <a href="/" class="brand">starling-inspect</a>
+    <a href="/" class="brand">
+      <svg class="brand-mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/>
+        <path d="M13.5 2.5v3h-3"/>
+      </svg>
+      <span>starling-inspect</span>
+    </a>
     <nav class="topnav">
-      <a href="/">Runs</a>
-      <a href="/diff">Diff</a>
+      <a href="/"     data-nav="runs" {{if eq .Nav "runs"}}class="active"{{end}}>Runs</a>
+      <a href="/diff" data-nav="diff" {{if eq .Nav "diff"}}class="active"{{end}}>Diff</a>
     </nav>
+    <span class="topbar-spacer"></span>
+    {{if .DBLabel}}
+      <span class="topbar-context" title="{{.DBPath}}">
+        <span class="topbar-context-icon"></span>{{.DBLabel}}
+      </span>
+    {{end}}
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme">
+      <svg class="icon-dark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/>
+      </svg>
+      <svg class="icon-light" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="8" cy="8" r="3"/>
+        <path d="M8 1.5v1.5M8 13v1.5M14.5 8H13M3 8H1.5M12.6 3.4l-1 1M5.4 10.6l-1 1M12.6 12.6l-1-1M5.4 5.4l-1-1"/>
+      </svg>
+    </button>
   </header>
   <main>
     {{template "content" .}}

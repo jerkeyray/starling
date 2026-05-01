@@ -13,15 +13,21 @@
   <div class="controls">
     <form id="search-form" method="get" action="/" role="search">
       {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
-      <input
-        id="filter"
-        name="q"
-        type="search"
-        placeholder="search runs (id, status)…"
-        autocomplete="off"
-        value="{{.Query}}"
-        aria-label="search runs"
-      >
+      <span class="search-wrap">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5"/>
+          <path d="M10.5 10.5 14 14"/>
+        </svg>
+        <input
+          id="filter"
+          name="q"
+          type="search"
+          placeholder="search runs (id, status)…"
+          autocomplete="off"
+          value="{{.Query}}"
+          aria-label="search runs"
+        >
+      </span>
     </form>
     <nav class="status-tabs" aria-label="filter by status">
       {{$cur := .Status}}{{$q := .Query}}{{$pre := .Preset}}

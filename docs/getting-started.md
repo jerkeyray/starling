@@ -110,11 +110,28 @@ Then, in another shell:
 go run github.com/jerkeyray/starling/cmd/starling-inspect runs.db
 ```
 
-The browser opens to a list of every run, per-run totals (cost,
-tokens, duration), and a per-event timeline. There's also a
-[`/diff`](#) page that shows two runs side-by-side aligned by
-sequence number — useful for narrowing where two near-identical runs
-diverged.
+The browser opens to a dark-by-default list of every run with
+per-run totals (cost, tokens, duration), color-coded status
+badges, and a per-event timeline. The topbar carries a theme
+toggle and a context chip showing the open DB. The `/diff` page
+(linked from the topbar) lets you click-to-pick any two recorded
+runs from dropdowns and renders them side-by-side, aligned by
+sequence number, with diverging rows flagged via a colored left
+rail — useful for narrowing where two near-identical runs broke
+apart.
+
+A few keyboard shortcuts are worth knowing on the run page —
+`?` in the timeline header toggles a popover with the full list:
+
+- `j`/`k` (or arrows): move through the timeline.
+- `g`/`G`: jump to top/bottom.
+- `/` focus the filter, `Esc` clears it.
+- `c` copies the run id; `y` yanks the active event's hash.
+- `w` toggles line-wrapping in the JSON pane.
+
+Hashes and run ids are click-to-copy throughout, the JSON pane
+syntax-highlights its payload server-side, and long string values
+wrap by default so you don't have to scroll horizontally.
 
 ## Replay
 

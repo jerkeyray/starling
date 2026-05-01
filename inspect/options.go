@@ -19,6 +19,19 @@ func WithReplayer(factory replay.Factory) Option {
 	}
 }
 
+// WithDBPath sets the human-readable database path label rendered
+// in the inspector's topbar context chip. Use the file path; the UI
+// shows just the basename and exposes the full path on hover.
+//
+// Empty (the default) hides the chip — useful when the inspector
+// is mounted behind a reverse proxy and the local file path
+// wouldn't be meaningful to the operator.
+func WithDBPath(path string) Option {
+	return func(s *Server) {
+		s.dbPath = path
+	}
+}
+
 // WithAuth installs an authentication middleware that runs before
 // every request reaches the mux. Passing nil is a no-op — the server
 // stays public, matching the default localhost-developer posture. See

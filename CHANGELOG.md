@@ -87,6 +87,95 @@ compatibility promise until the first GA (`v1.0.0`) tag.
   `metrics.md`, `save-file.md`) plus `docs/faq.md`. README and
   `docs/README.md` indices updated to match.
 
+### Inspector UI revamp
+
+- **Dark mode by default**, with a theme toggle (☀/🌙) in the
+  topbar. The choice persists in `localStorage`; without one, the
+  page follows `prefers-color-scheme`. A pre-paint script in
+  `layout.html` applies the persisted value before the first frame
+  to avoid a theme flash.
+- New token system in `app.css`: 12-step neutral scale plus accent
+  and four semantic colors, defined for both palettes. Every
+  surface, border, badge, and chip resolves from the tokens — no
+  more hard-coded hex.
+- Topbar polished: brand glyph, active-page underline on
+  Runs/Diff, an open-DB context chip (basename, hover for full
+  path), theme toggle.
+- Filter inputs gained a leading magnifier icon (runs page and the
+  per-run timeline filter); buttons unified on a single
+  token-driven shape; `tab.active` and `chip.active` are distinct.
+- Totals strip restyled with subtle gradient and stronger numeric
+  hierarchy; the per-run page reuses the same component.
+- Run detail pane:
+  - **Server-side JSON syntax highlighting.** New `highlightJSON`
+    renders `.tok-key`, `.tok-string`, `.tok-num`, `.tok-bool`,
+    `.tok-null`, `.tok-punct` spans; CSS colors them. No
+    client-side parser, no JS dependency added.
+  - **Sticky meta header** inside the pane — kind, hash, prev,
+    call stay visible while the payload scrolls.
+  - **Click-to-copy** on hash readouts and the run-id heading.
+    Inline copies fire a transient toast; explicit copy buttons
+    keep the existing label-swap behavior.
+- Timeline keyboard shortcuts gained `c` (copy run id) and `y`
+  (yank current event's hash). Hint row in `run.html` updated.
+- Diff page payloads pick up the same syntax highlight via shared
+  `highlightJSON` + `payload-json` styles.
+- New `inspect.WithDBPath` option — populates the topbar context
+  chip with the basename of the open DB; `cmd/starling-inspect`
+  passes it automatically.
+
+### Inspector UI follow-ups
+
+- **Brand colors locked.** Primary `--accent` is the Go teal
+  (`#00add8` dark / `#0089aa` light) used for the brand mark,
+  active tab, Replay button, run-id hover, lifecycle event kinds,
+  callid links, and JSON keys. Secondary `--accent-green`
+  (`#14d693` / `#0e9a6c`) covers success: validated badge, live
+  pill, tool-family event kinds, JSON strings.
+- **Neutral grey palette.** `--gray-1..12` flipped from a slate
+  (blue-cast) ramp to true R=G=B neutral. Background goes to pure
+  black (`#000`); surfaces step `#0a0a0a → #141414 → #1c1c1c` for
+  charcoal-grey-on-black, no blue tint.
+- **Square corners.** `--radius-pill` collapsed `999px → 3px`. All
+  badges, chips, status-tabs, live-pill, status pill are now
+  rectangular. Brand glyph and live-pill dot are square.
+- **Reload-spinner brand mark.** Replaces the colored square next
+  to "starling-inspect" with the same circular-arrow SVG the
+  starling-docs site uses as its favicon. Tiny rotation on hover.
+- **Diff page is click-to-pick.** New server-side `diffOptions`
+  surfaces all recorded runs through two `<select>` dropdowns
+  (`{shortID · started · status}`), so you no longer paste run
+  IDs to compare. Falls back to the original text inputs if
+  `ListRuns` errors. Diverging rows now use a 3-px colored left
+  rail instead of a full red/yellow background flood — the page
+  reads as differences, not alarms.
+- **Run detail page consolidated.** Run-head merges the live pill
+  and validation badge onto one row; the duplicate "9 events"
+  caption is gone (the totals strip already showed it). Totals
+  use a `totals-compact` variant on this page, single-line
+  inline `dt`/`dd` rather than the dashboard's stacked block.
+  The "EVENT TIMELINE" / "Event detail" pane labels are dropped;
+  the column structure speaks for itself. Keyboard hints are
+  folded behind a "?" toggle button so the timeline isn't
+  framed by a permanent four-line legend.
+- **JSON pane: wrap by default.** `.payload-json` now uses
+  `white-space: pre-wrap` plus `overflow-wrap: anywhere` so long
+  string values reflow inside the pane width and base64 hashes
+  break mid-token instead of forcing a horizontal scroll. A new
+  `[data-wrap-toggle]` icon button (and the `w` keyboard
+  shortcut) flips back to strict-pre for diff-by-eye work; the
+  choice persists per-user via `localStorage`. Re-applied on
+  every HTMX detail-pane swap.
+- **More keyboard shortcuts on the run page.** `c` copies the run
+  id, `y` yanks the active event's hash to the clipboard, `w`
+  toggles JSON line wrap. The transient toast confirms each
+  copy without clobbering the displayed text.
+- Smaller polish: search inputs gain a leading magnifier icon
+  with proper left-padding so the placeholder doesn't overlap;
+  topbar uses solid-bg (no blur) and a square brand glyph on its
+  ring; tabs render as connected boxes inside one bordered
+  container with vertical separators.
+
 ## [v0.1.0-beta.1] - 2026-04-30
 
 First public beta tag. Subsequent betas will record their deltas

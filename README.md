@@ -256,15 +256,21 @@ out, err := step.CallTool(ctx, step.ToolCall{
 
 ## Inspector
 
-The inspector serves a local browser UI for recorded runs.
-
 ```bash
 go run ./cmd/starling-inspect starling.db
 ```
 
-Open `http://localhost:8080` to inspect event streams, tool calls, usage,
-budgets, replay results, and divergence details. The inspector is a self-hosted
-Go server with no CDN or JavaScript build step.
+![Inspector runs dashboard](docs/inspector/runs.webp)
+
+Loopback web UI: runs list with per-row totals, per-event timeline
+with a syntax-highlighted JSON detail pane, and a `/diff` page
+aligning any two runs side-by-side by sequence number. Dark by
+default, theme toggle in the topbar, hashes and run ids are
+click-to-copy, no CDN or JS build step. Runs read-only — `Append`
+is impossible on the inspector's DB handle.
+
+Full tour and screenshots in the
+[docs site](https://github.com/jerkeyray/starling-docs).
 
 ## Production Checklist
 

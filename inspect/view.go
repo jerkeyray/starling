@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
+	"html/template"
 	"net/url"
 	"strings"
 	"time"
@@ -230,7 +232,8 @@ type eventDetail struct {
 	PrevHashHex   string
 	PrevHashShort string
 	CallID        string
-	JSON          string // pretty-printed event.ToJSON output
+	JSON          string        // pretty-printed event.ToJSON output, plain text (used as copy source)
+	JSONHTML      template.HTML // pretty-printed JSON with .tok-* spans for syntax highlight
 }
 
 // kindFamily groups event kinds by visual category so the timeline
@@ -423,6 +426,7 @@ func detailFromEvent(runID string, ev event.Event) eventDetail {
 		PrevHashShort: prevShort,
 		CallID:        callID,
 		JSON:          pretty,
+		JSONHTML:      highlightJSON(pretty),
 	}
 }
 
@@ -447,6 +451,97 @@ func prettyJSON(ev event.Event) string {
 		return string(raw)
 	}
 	return buf.String()
+}
+
+// highlightJSON wraps the tokens of a pretty-printed JSON document
+// in span elements (.tok-key / .tok-string / .tok-num / .tok-bool /
+// .tok-null / .tok-punct) so CSS can color them. Server-side so the
+// inspector stays JS-free; uses a small hand-rolled scanner because
+// encoding/json doesn't expose tokens with their original whitespace.
+//
+// Input is the output of prettyJSON (already indented). Non-JSON
+// fallback strings ("// could not decode payload: ...") are escaped
+// as plain text so a decode error still renders safely.
+func highlightJSON(pretty string) template.HTML {
+	if pretty == "" {
+		return ""
+	}
+	if !strings.HasPrefix(pretty, "{") && !strings.HasPrefix(pretty, "[") {
+		return template.HTML(html.EscapeString(pretty))
+	}
+
+	var b strings.Builder
+	b.Grow(len(pretty) + len(pretty)/4)
+
+	i := 0
+	for i < len(pretty) {
+		c := pretty[i]
+		switch {
+		case c == '"':
+			// Scan to the closing quote, honoring backslash escapes.
+			j := i + 1
+			for j < len(pretty) {
+				if pretty[j] == '\\' && j+1 < len(pretty) {
+					j += 2
+					continue
+				}
+				if pretty[j] == '"' {
+					j++
+					break
+				}
+				j++
+			}
+			tok := pretty[i:j]
+			cls := "tok-string"
+			// Keys are followed (after optional whitespace) by ':'.
+			k := j
+			for k < len(pretty) && (pretty[k] == ' ' || pretty[k] == '\t') {
+				k++
+			}
+			if k < len(pretty) && pretty[k] == ':' {
+				cls = "tok-key"
+			}
+			b.WriteString(`<span class="`)
+			b.WriteString(cls)
+			b.WriteString(`">`)
+			b.WriteString(html.EscapeString(tok))
+			b.WriteString(`</span>`)
+			i = j
+		case c == '{' || c == '}' || c == '[' || c == ']' || c == ',' || c == ':':
+			b.WriteString(`<span class="tok-punct">`)
+			b.WriteByte(c)
+			b.WriteString(`</span>`)
+			i++
+		case c == '-' || (c >= '0' && c <= '9'):
+			j := i + 1
+			for j < len(pretty) {
+				d := pretty[j]
+				if (d >= '0' && d <= '9') || d == '.' || d == 'e' || d == 'E' || d == '+' || d == '-' {
+					j++
+					continue
+				}
+				break
+			}
+			b.WriteString(`<span class="tok-num">`)
+			b.WriteString(html.EscapeString(pretty[i:j]))
+			b.WriteString(`</span>`)
+			i = j
+		case c == 't' && strings.HasPrefix(pretty[i:], "true"):
+			b.WriteString(`<span class="tok-bool">true</span>`)
+			i += 4
+		case c == 'f' && strings.HasPrefix(pretty[i:], "false"):
+			b.WriteString(`<span class="tok-bool">false</span>`)
+			i += 5
+		case c == 'n' && strings.HasPrefix(pretty[i:], "null"):
+			b.WriteString(`<span class="tok-null">null</span>`)
+			i += 4
+		default:
+			// Whitespace and anything else: escape and emit verbatim.
+			b.WriteString(html.EscapeString(string(c)))
+			i++
+		}
+	}
+	return template.HTML(b.String())
 }
 
 // validationFromError turns the result of eventlog.Validate into the

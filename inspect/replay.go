@@ -129,11 +129,11 @@ func (s *Server) handleReplayPage(w http.ResponseWriter, r *http.Request, runID 
 		http.NotFound(w, r)
 		return
 	}
-	s.tpl.render(w, "replay.html", http.StatusOK, map[string]any{
+	s.tpl.render(w, "replay.html", http.StatusOK, s.applyChrome(map[string]any{
 		"Title":      "Replay " + runID,
 		"RunID":      runID,
 		"EventCount": len(events),
-	})
+	}, "runs"))
 }
 
 // handleReplayStart constructs a new session and returns its id as

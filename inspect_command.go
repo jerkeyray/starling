@@ -154,7 +154,7 @@ func (c *InspectCmd) Run(args []string) error {
 		token = os.Getenv("STARLING_INSPECT_TOKEN")
 	}
 
-	opts := []inspect.Option{}
+	opts := []inspect.Option{inspect.WithDBPath(dbPath)}
 	if c.Factory != nil {
 		opts = append(opts, inspect.WithReplayer(c.Factory))
 	}

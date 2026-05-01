@@ -8,13 +8,21 @@
   <dl class="detail-hashes">
     <dt>hash</dt>
     <dd>
-      <code title="{{.HashHex}}">{{.HashShort}}</code>
-      {{if .HashHex}}<button type="button" class="copy-btn" data-copy="{{.HashHex}}" aria-label="copy hash">copy</button>{{end}}
+      {{if .HashHex}}
+        <code title="{{.HashHex}} (click to copy)" data-copy="{{.HashHex}}">{{.HashShort}}</code>
+        <button type="button" class="copy-btn" data-copy="{{.HashHex}}" aria-label="copy hash">copy</button>
+      {{else}}
+        <code>{{.HashShort}}</code>
+      {{end}}
     </dd>
     <dt>prev</dt>
     <dd>
-      <code title="{{.PrevHashHex}}">{{.PrevHashShort}}</code>
-      {{if .PrevHashHex}}<button type="button" class="copy-btn" data-copy="{{.PrevHashHex}}" aria-label="copy prev hash">copy</button>{{end}}
+      {{if .PrevHashHex}}
+        <code title="{{.PrevHashHex}} (click to copy)" data-copy="{{.PrevHashHex}}">{{.PrevHashShort}}</code>
+        <button type="button" class="copy-btn" data-copy="{{.PrevHashHex}}" aria-label="copy prev hash">copy</button>
+      {{else}}
+        <code>{{.PrevHashShort}}</code>
+      {{end}}
     </dd>
     {{if .CallID}}
     <dt>call</dt>
@@ -32,15 +40,26 @@
 </header>
 
 <div class="payload-wrap">
-  <pre class="payload-json"><code>{{.JSON}}</code></pre>
-  <button type="button" class="log-copy-fab"
-          data-copy="{{.JSON}}"
-          title="Copy this event's JSON"
-          aria-label="copy event JSON">
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="5" y="5" width="9" height="9" rx="1.5"/>
-      <path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11"/>
-    </svg>
-  </button>
+  <div class="payload-actions">
+    <button type="button" class="payload-action" data-wrap-toggle
+            title="Toggle line wrapping (w)" aria-label="toggle line wrapping">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M2 4h12"/>
+        <path d="M2 8h9a2.5 2.5 0 0 1 0 5H8"/>
+        <path d="m10 11-2 2 2 2"/>
+        <path d="M2 14h4"/>
+      </svg>
+    </button>
+    <button type="button" class="payload-action"
+            data-copy="{{.JSON}}"
+            title="Copy this event's JSON"
+            aria-label="copy event JSON">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="5" y="5" width="9" height="9" rx="1.5"/>
+        <path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11"/>
+      </svg>
+    </button>
+  </div>
+  <pre class="payload-json"><code>{{.JSONHTML}}</code></pre>
 </div>
 {{end}}

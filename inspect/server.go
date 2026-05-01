@@ -51,6 +51,7 @@ type Server struct {
 	mux      *http.ServeMux
 	replayer replay.Factory // nil → view-only; replay routes hidden / 404
 	auth     Authenticator  // nil → public (default localhost posture)
+	dbPath   string         // human-readable label rendered in the topbar; empty hides the chip
 
 	sessMu   sync.Mutex
 	sessions map[string]*replaySession
@@ -94,6 +95,33 @@ func New(store eventlog.EventLog, opts ...Option) (*Server, error) {
 // WithReplayer. UI templates use this to hide the Replay button on
 // view-only deployments.
 func (s *Server) ReplayEnabled() bool { return s.replayer != nil }
+
+// applyChrome merges layout-wide template fields (DB path label,
+// active-nav hint) into a per-page view-model. Handlers call this
+// before tpl.render so the topbar always has its context.
+func (s *Server) applyChrome(data map[string]any, navKey string) map[string]any {
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["DBPath"] = s.dbPath
+	data["DBLabel"] = dbLabel(s.dbPath)
+	data["Nav"] = navKey
+	return data
+}
+
+// dbLabel returns the basename of path for display in the topbar
+// chip. Empty input returns empty so the chip is hidden.
+func dbLabel(path string) string {
+	if path == "" {
+		return ""
+	}
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[i+1:]
+		}
+	}
+	return path
+}
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleRuns)

@@ -1,6 +1,8 @@
 package inspect
 
 import (
+	"context"
+	"html/template"
 	"net/http"
 
 	"github.com/jerkeyray/starling/event"
@@ -17,13 +19,19 @@ import (
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	a := r.URL.Query().Get("a")
 	b := r.URL.Query().Get("b")
+
+	// Always populate the picker dropdowns — even on the populated
+	// page, the user might want to swap one side without retyping
+	// the other.
+	options := s.diffOptions(r.Context())
+
 	if a == "" || b == "" {
-		// Render a tiny picker page so the link doesn't 404.
-		s.tpl.render(w, "diff.html", http.StatusOK, map[string]any{
+		s.tpl.render(w, "diff.html", http.StatusOK, s.applyChrome(map[string]any{
 			"Title": "Diff runs",
 			"A":     a, "B": b,
-			"Empty": true,
-		})
+			"Empty":   true,
+			"Options": options,
+		}, "diff"))
 		return
 	}
 	evsA, err := s.store.Read(r.Context(), a)
@@ -37,26 +45,62 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, summary := buildDiffRows(evsA, evsB)
-	s.tpl.render(w, "diff.html", http.StatusOK, map[string]any{
+	s.tpl.render(w, "diff.html", http.StatusOK, s.applyChrome(map[string]any{
 		"Title":   "Diff",
 		"A":       a,
 		"B":       b,
 		"Rows":    rows,
 		"Summary": summary,
-	})
+		"Options": options,
+	}, "diff"))
+}
+
+// diffOption is one entry in the diff page's run dropdown.
+type diffOption struct {
+	RunID string
+	Label string // e.g. "01KQJ260… · 2026-05-01 20:53 · completed"
+}
+
+// diffOptions builds the option list for the diff page's two
+// run-pickers. Best-effort: a backend that errors out returns nil
+// and the template falls back to free-form text inputs.
+func (s *Server) diffOptions(ctx context.Context) []diffOption {
+	if s.lister == nil {
+		return nil
+	}
+	runs, err := s.lister.ListRuns(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make([]diffOption, len(runs))
+	for i, rs := range runs {
+		label, _ := statusOf(rs.TerminalKind)
+		ts := rs.StartedAt.Local().Format("2006-01-02 15:04")
+		shortID := rs.RunID
+		if len(shortID) > 12 {
+			shortID = shortID[:12] + "…"
+		}
+		out[i] = diffOption{
+			RunID: rs.RunID,
+			Label: shortID + " · " + ts + " · " + label,
+		}
+	}
+	return out
 }
 
 // diffRow is one aligned event pair on the diff page.
 type diffRow struct {
-	Seq      uint64
-	KindA    string
-	KindB    string
-	BodyA    string
-	BodyB    string
-	Class    string // "match" | "diff" | "only-a" | "only-b"
-	HasA     bool
-	HasB     bool
-	OnlyKind bool // only kinds disagree, not the body bytes
+	Seq       uint64
+	KindA     string
+	KindB     string
+	BodyA     string // raw pretty-JSON; equality test uses this
+	BodyB     string
+	BodyAHTML template.HTML // syntax-highlighted form for the template
+	BodyBHTML template.HTML
+	Class     string // "match" | "diff" | "only-a" | "only-b"
+	HasA      bool
+	HasB      bool
+	OnlyKind  bool // only kinds disagree, not the body bytes
 }
 
 type diffSummary struct {
@@ -104,6 +148,8 @@ func buildDiffRows(a, b []event.Event) ([]diffRow, diffSummary) {
 			row.KindB = evB.Kind.String()
 			row.BodyA = prettyJSON(evA)
 			row.BodyB = prettyJSON(evB)
+			row.BodyAHTML = highlightJSON(row.BodyA)
+			row.BodyBHTML = highlightJSON(row.BodyB)
 			switch {
 			case row.KindA != row.KindB:
 				row.Class = "diff"
@@ -125,6 +171,7 @@ func buildDiffRows(a, b []event.Event) ([]diffRow, diffSummary) {
 		case okA:
 			row.KindA = evA.Kind.String()
 			row.BodyA = prettyJSON(evA)
+			row.BodyAHTML = highlightJSON(row.BodyA)
 			row.Class = "only-a"
 			summary.OnlyA++
 			if summary.FirstDivSeq == 0 {
@@ -133,6 +180,7 @@ func buildDiffRows(a, b []event.Event) ([]diffRow, diffSummary) {
 		case okB:
 			row.KindB = evB.Kind.String()
 			row.BodyB = prettyJSON(evB)
+			row.BodyBHTML = highlightJSON(row.BodyB)
 			row.Class = "only-b"
 			summary.OnlyB++
 			if summary.FirstDivSeq == 0 {

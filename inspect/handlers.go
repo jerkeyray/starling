@@ -29,7 +29,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	preset := r.URL.Query().Get("preset")
 	rows = filterByPreset(rows, preset, time.Now())
 
-	s.tpl.render(w, "runs.html", http.StatusOK, map[string]any{
+	s.tpl.render(w, "runs.html", http.StatusOK, s.applyChrome(map[string]any{
 		"Title":  "Runs",
 		"Rows":   rows,
 		"Total":  len(summaries),
@@ -37,7 +37,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		"Query":  query,
 		"Preset": preset,
 		"Totals": dashTotalsFromRows(rows),
-	})
+	}, "runs"))
 }
 
 // handleRun renders a single run's two-pane detail view: timeline on
@@ -101,7 +101,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request, runID string)
 		DurationMs:    durNs / 1_000_000,
 	}
 
-	s.tpl.render(w, "run.html", http.StatusOK, map[string]any{
+	s.tpl.render(w, "run.html", http.StatusOK, s.applyChrome(map[string]any{
 		"Title":         "Run " + runID,
 		"RunID":         runID,
 		"Rows":          rows,
@@ -111,7 +111,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request, runID string)
 		"TerminalKind":  terminalKind,
 		"LastSeq":       lastSeq,
 		"Summary":       summary,
-	})
+	}, "runs"))
 }
 
 // runSummary backs the top-of-page totals strip on the run detail

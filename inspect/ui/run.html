@@ -3,34 +3,29 @@
         data-run-id="{{runPath .RunID}}"
         data-run-terminal="{{.TerminalKind}}"
         data-last-seq="{{.LastSeq}}">
-  <div>
-    <h1>Run <span class="runid-mono">{{.RunID}}</span></h1>
-    <p class="run-meta">
-      <span><span id="event-count">{{len .Rows}}</span> events</span>
-      <span id="live-status" class="live-pill" hidden>live</span>
-      <button id="reconnect" class="reconnect" type="button" hidden>reconnect</button>
-    </p>
-  </div>
+  <h1>
+    <span class="run-head-label">Run</span>
+    <span class="runid-mono" data-copy="{{.RunID}}" title="click to copy">{{.RunID}}</span>
+  </h1>
   <div class="run-head-right">
-    {{if .ReplayEnabled}}
-    <a class="btn btn-replay" href="/run/{{runPath .RunID}}/replay">▶ Replay</a>
-    {{end}}
+    <span id="live-status" class="live-pill" hidden>live</span>
+    <button id="reconnect" class="reconnect" type="button" hidden>reconnect</button>
     {{with .Validation}}
-    <div class="validation">
-      <span class="badge badge-{{.Class}}">{{if .OK}}✓{{else}}✗{{end}} {{.Label}}</span>
-      {{if .Reason}}<p class="validation-reason">{{.Reason}}</p>{{end}}
-    </div>
+      <span class="badge badge-{{.Class}}" {{if .Reason}}title="{{.Reason}}"{{end}}>{{if .OK}}✓{{else}}✗{{end}} {{.Label}}</span>
+    {{end}}
+    {{if .ReplayEnabled}}
+      <a class="btn btn-replay" href="/run/{{runPath .RunID}}/replay">▶ Replay</a>
     {{end}}
   </div>
 </header>
 
 {{with .Summary}}
-<dl class="totals" aria-label="run totals">
-  <div><dt>events</dt><dd>{{.EventCount}}</dd></div>
+<dl class="totals totals-compact" aria-label="run totals">
+  <div><dt>events</dt><dd id="event-count">{{.EventCount}}</dd></div>
   <div><dt>turns</dt><dd>{{.TurnCount}}</dd></div>
-  <div><dt>tool calls</dt><dd>{{.ToolCallCount}}</dd></div>
-  <div><dt>input tok</dt><dd>{{.InputTokens}}</dd></div>
-  <div><dt>output tok</dt><dd>{{.OutputTokens}}</dd></div>
+  <div><dt>tools</dt><dd>{{.ToolCallCount}}</dd></div>
+  <div><dt>in tok</dt><dd>{{.InputTokens}}</dd></div>
+  <div><dt>out tok</dt><dd>{{.OutputTokens}}</dd></div>
   <div><dt>cost</dt><dd>${{printf "%.4f" .CostUSD}}</dd></div>
   <div><dt>duration</dt><dd>{{.DurationMs}} ms</dd></div>
 </dl>
@@ -38,27 +33,36 @@
 
 <section class="run-pane">
   <div class="timeline-pane">
-    <h2 class="pane-label">Event timeline</h2>
     <div class="timeline-head">
-      <input id="timeline-filter"
-             type="search"
-             placeholder="filter events (kind, call id, text)…"
-             autocomplete="off"
-             aria-label="filter timeline">
+      <span class="search-wrap">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5"/>
+          <path d="M10.5 10.5 14 14"/>
+        </svg>
+        <input id="timeline-filter"
+               type="search"
+               placeholder="filter events…"
+               autocomplete="off"
+               aria-label="filter timeline">
+      </span>
       <span class="visible-count" id="timeline-visible"></span>
+      <details class="hint-toggle">
+        <summary aria-label="keyboard shortcuts">?</summary>
+        <div class="hint-pop">
+          <div><span class="kbd">j</span><span class="kbd">k</span> next/prev event</div>
+          <div><span class="kbd">g</span><span class="kbd">G</span> top/bottom</div>
+          <div><span class="kbd">/</span> focus filter · <span class="kbd">Esc</span> clear</div>
+          <div><span class="kbd">c</span> copy run id · <span class="kbd">y</span> yank hash</div>
+          <div><span class="kbd">w</span> toggle line wrap</div>
+        </div>
+      </details>
     </div>
     <ol class="timeline" id="timeline">
       {{range .Rows}}{{template "event_row.html" .}}{{end}}
     </ol>
-    <div class="hint-row">
-      <span><span class="kbd">j</span> down · <span class="kbd">k</span> up</span>
-      <span><span class="kbd">/</span> focus filter</span>
-      <span><span class="kbd">Esc</span> clear</span>
-    </div>
   </div>
 
   <aside id="detail" class="detail">
-    <h2 class="pane-label">Event detail</h2>
     {{template "event_detail.html" .Initial}}
   </aside>
 </section>

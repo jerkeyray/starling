@@ -8,10 +8,31 @@
 </header>
 
 <form method="get" action="/diff" class="diff-picker">
-  <label>A <input name="a" value="{{.A}}" placeholder="run-id-a" required></label>
-  <label>B <input name="b" value="{{.B}}" placeholder="run-id-b" required></label>
+  {{if .Options}}
+    <label class="diff-pick">
+      <span class="diff-pick-label">A</span>
+      <select name="a" required>
+        <option value="" disabled {{if not .A}}selected{{end}}>— pick a run —</option>
+        {{range .Options}}
+          <option value="{{.RunID}}" {{if eq .RunID $.A}}selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </label>
+    <label class="diff-pick">
+      <span class="diff-pick-label">B</span>
+      <select name="b" required>
+        <option value="" disabled {{if not .B}}selected{{end}}>— pick a run —</option>
+        {{range .Options}}
+          <option value="{{.RunID}}" {{if eq .RunID $.B}}selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </label>
+  {{else}}
+    <label>A <input name="a" value="{{.A}}" placeholder="run-id-a" required></label>
+    <label>B <input name="b" value="{{.B}}" placeholder="run-id-b" required></label>
+  {{end}}
   <button type="submit">Compare</button>
-  <span class="diff-hint">Tip: open two run pages in tabs and copy their IDs.</span>
+  {{if not .Options}}<span class="diff-hint">Tip: open two run pages in tabs and copy their IDs.</span>{{end}}
 </form>
 
 {{if .Empty}}
@@ -35,7 +56,7 @@
       <div class="diff-side">
         {{if .HasA}}
           <div class="diff-kind">{{.KindA}}</div>
-          <pre class="diff-body">{{.BodyA}}</pre>
+          <pre class="diff-body payload-json">{{.BodyAHTML}}</pre>
         {{else}}
           <div class="diff-empty">—</div>
         {{end}}
@@ -43,7 +64,7 @@
       <div class="diff-side">
         {{if .HasB}}
           <div class="diff-kind">{{.KindB}}</div>
-          <pre class="diff-body">{{.BodyB}}</pre>
+          <pre class="diff-body payload-json">{{.BodyBHTML}}</pre>
         {{else}}
           <div class="diff-empty">—</div>
         {{end}}
