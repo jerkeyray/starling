@@ -1,9 +1,7 @@
 // Package anthropic adapts the Anthropic Messages API to Starling's
-// Provider interface with streaming and usage-update normalization.
-//
-// The adapter uses github.com/anthropics/anthropic-sdk-go for HTTP +
-// SSE transport, but all event-payload translation lives here so the
-// normalized StreamChunk sequence stays stable across SDK versions.
+// Provider interface. Transport uses anthropic-sdk-go; event-payload
+// translation lives here so StreamChunk output stays stable across
+// SDK versions.
 package anthropic
 
 import (
@@ -24,13 +22,11 @@ import (
 // example and is well below any in-tree model's hard cap.
 const DefaultMaxOutputTokens = 4096
 
-// New constructs a Provider that talks to the Anthropic Messages API.
-// WithBaseURL / WithHTTPClient can redirect to a test server or a
-// compatible proxy.
+// New constructs a Provider for the Anthropic Messages API.
 func New(opts ...Option) (provider.Provider, error) {
 	cfg := config{
 		providerID: "anthropic",
-		apiVersion: "2023-06-01", // Anthropic's anthropic-version header default
+		apiVersion: "2023-06-01", // anthropic-version header
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -51,7 +47,6 @@ func New(opts ...Option) (provider.Provider, error) {
 	return &anthropicProvider{client: &client, cfg: cfg}, nil
 }
 
-// Option configures the Anthropic provider.
 type Option func(*config)
 
 type config struct {
@@ -62,26 +57,19 @@ type config struct {
 	apiVersion string
 }
 
-// WithAPIKey sets the API key used for authentication. If unset, the
-// underlying SDK falls back to the ANTHROPIC_API_KEY environment
-// variable.
+// WithAPIKey sets the API key. Falls back to ANTHROPIC_API_KEY env if unset.
 func WithAPIKey(key string) Option { return func(c *config) { c.apiKey = key } }
 
-// WithBaseURL overrides the API base URL.
 func WithBaseURL(url string) Option { return func(c *config) { c.baseURL = url } }
 
-// WithHTTPClient supplies a custom *http.Client.
 func WithHTTPClient(c *http.Client) Option {
 	return func(cfg *config) { cfg.httpClient = c }
 }
 
-// WithProviderID overrides the Info().ID string. Useful when a
-// compatibility proxy wants to identify itself distinctly in the event
-// log. Defaults to "anthropic".
+// WithProviderID overrides the Info().ID, useful when a compatibility
+// proxy wants a distinct label in the event log.
 func WithProviderID(id string) Option { return func(c *config) { c.providerID = id } }
 
-// WithAPIVersion overrides the Info().APIVersion string. Defaults to
-// "2023-06-01" to match the SDK's default anthropic-version header.
 func WithAPIVersion(v string) Option { return func(c *config) { c.apiVersion = v } }
 
 type anthropicProvider struct {

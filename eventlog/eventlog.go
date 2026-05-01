@@ -14,19 +14,15 @@ import (
 	"github.com/jerkeyray/starling/event"
 )
 
-// RunSummary is a per-run capsule returned by EventLog.ListRuns. It is
-// deliberately small: enough to populate a "list of runs" view in a
-// debugger or dashboard without loading every event for every run.
-//
-// TerminalKind is the Kind of the run's last event. For an in-progress
-// run the last event will not be terminal; callers should consult
-// Kind.IsTerminal to distinguish "still running" from "ended cleanly /
-// failed / cancelled".
+// RunSummary is a per-run capsule returned by EventLog.ListRuns —
+// enough to populate a list-of-runs view without loading every event.
+// TerminalKind is the most recent event's kind; for an in-progress run
+// it won't satisfy Kind.IsTerminal.
 type RunSummary struct {
-	RunID        string     // The run identifier.
-	StartedAt    time.Time  // Wall-clock timestamp of the first event.
-	LastSeq      uint64     // Sequence number of the most recent event.
-	TerminalKind event.Kind // Kind of the most recent event (terminal or not).
+	RunID        string
+	StartedAt    time.Time
+	LastSeq      uint64
+	TerminalKind event.Kind
 }
 
 // EventLog is an append-only, per-run ledger of events.

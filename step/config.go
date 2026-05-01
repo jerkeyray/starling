@@ -22,7 +22,7 @@ const (
 
 	// ModeReplay consumes pre-recorded SideEffectRecorded events from
 	// Config.Recorded in order, returning the stored values instead of
-	// re-running the effect. Intended for the replay verifier (T17).
+	// re-running the effect. Used by the replay verifier.
 	ModeReplay
 )
 

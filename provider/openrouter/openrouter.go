@@ -14,7 +14,7 @@ import (
 // DefaultBaseURL is the public OpenRouter endpoint.
 const DefaultBaseURL = "https://openrouter.ai/api/v1"
 
-// New constructs a Provider that talks to OpenRouter.
+// New constructs a Provider for OpenRouter.
 func New(opts ...Option) (provider.Provider, error) {
 	cfg := config{
 		baseURL:    DefaultBaseURL,
@@ -72,7 +72,6 @@ func (p *openrouterProvider) Capabilities() provider.Capabilities {
 	}
 }
 
-// Option configures the OpenRouter provider.
 type Option func(*config)
 
 type config struct {
@@ -84,30 +83,25 @@ type config struct {
 	providerID  string
 }
 
-// WithAPIKey sets the OpenRouter API key.
 func WithAPIKey(key string) Option { return func(c *config) { c.apiKey = key } }
 
-// WithBaseURL overrides the API base URL. Defaults to DefaultBaseURL.
 func WithBaseURL(url string) Option { return func(c *config) { c.baseURL = url } }
 
-// WithHTTPReferer sets the HTTP-Referer header for OpenRouter
-// attribution. Optional.
+// WithHTTPReferer sets the HTTP-Referer attribution header.
 func WithHTTPReferer(url string) Option { return func(c *config) { c.httpReferer = url } }
 
-// WithXTitle sets the X-Title header for OpenRouter attribution.
-// Optional.
+// WithXTitle sets the X-Title attribution header.
 func WithXTitle(name string) Option { return func(c *config) { c.xTitle = name } }
 
-// WithHTTPClient supplies a custom *http.Client. Attribution headers,
-// if set, are layered on top of the caller's transport.
+// WithHTTPClient supplies a custom *http.Client; attribution headers
+// layer on top of its transport.
 func WithHTTPClient(c *http.Client) Option {
 	return func(cfg *config) { cfg.httpClient = c }
 }
 
-// WithProviderID overrides Info().ID. Defaults to "openrouter".
 func WithProviderID(id string) Option { return func(c *config) { c.providerID = id } }
 
-// headerRoundTripper injects attribution headers. Clones the request
+// headerRoundTripper injects attribution headers, cloning the request
 // so the caller's Request is not mutated.
 type headerRoundTripper struct {
 	referer string

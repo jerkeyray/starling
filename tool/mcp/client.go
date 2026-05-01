@@ -46,7 +46,6 @@ type Config struct {
 	TransientErrorClassifier func(error) bool
 }
 
-// Option configures a Client.
 type Option func(*Config)
 
 // WithClientInfo sets the MCP client implementation name and version.

@@ -14,7 +14,7 @@ import (
 	"github.com/jerkeyray/starling/provider"
 )
 
-// New constructs a Provider that talks to the Gemini API.
+// New constructs a Provider for the Gemini API.
 func New(opts ...Option) (provider.Provider, error) {
 	cfg := config{
 		providerID: "gemini",
@@ -45,7 +45,6 @@ func New(opts ...Option) (provider.Provider, error) {
 	return &geminiProvider{client: client, cfg: cfg}, nil
 }
 
-// Option configures the Gemini provider.
 type Option func(*config)
 
 type config struct {
@@ -56,22 +55,17 @@ type config struct {
 	apiVersion string
 }
 
-// WithAPIKey sets the API key. If unset, the SDK falls back to
-// GEMINI_API_KEY / GOOGLE_API_KEY.
+// WithAPIKey sets the API key. Falls back to GEMINI_API_KEY / GOOGLE_API_KEY env if unset.
 func WithAPIKey(key string) Option { return func(c *config) { c.apiKey = key } }
 
-// WithBaseURL overrides the API base URL.
 func WithBaseURL(url string) Option { return func(c *config) { c.baseURL = url } }
 
-// WithHTTPClient supplies a custom *http.Client.
 func WithHTTPClient(c *http.Client) Option {
 	return func(cfg *config) { cfg.httpClient = c }
 }
 
-// WithProviderID overrides Info().ID. Defaults to "gemini".
 func WithProviderID(id string) Option { return func(c *config) { c.providerID = id } }
 
-// WithAPIVersion overrides the API version. Defaults to "v1beta".
 func WithAPIVersion(v string) Option { return func(c *config) { c.apiVersion = v } }
 
 type geminiProvider struct {

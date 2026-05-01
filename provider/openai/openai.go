@@ -21,8 +21,8 @@ import (
 	"github.com/jerkeyray/starling/provider"
 )
 
-// New constructs a Provider that talks to OpenAI (or any OpenAI-compatible
-// endpoint when WithBaseURL is set).
+// New constructs a Provider for OpenAI or any OpenAI-compatible
+// endpoint (set WithBaseURL).
 func New(opts ...Option) (provider.Provider, error) {
 	cfg := config{
 		providerID: "openai",
@@ -50,7 +50,6 @@ func New(opts ...Option) (provider.Provider, error) {
 	return &openaiProvider{client: &client, cfg: cfg}, nil
 }
 
-// Option configures the OpenAI provider.
 type Option func(*config)
 
 type config struct {
@@ -62,29 +61,24 @@ type config struct {
 	apiVersion   string
 }
 
-// WithAPIKey sets the API key used for authentication.
 func WithAPIKey(key string) Option { return func(c *config) { c.apiKey = key } }
 
-// WithBaseURL overrides the API base URL. Set this to point at an
-// OpenAI-compatible endpoint (Groq, Together, OpenRouter, Ollama, ...).
+// WithBaseURL points the client at an OpenAI-compatible endpoint
+// (Groq, Together, Ollama, vLLM, ...).
 func WithBaseURL(url string) Option { return func(c *config) { c.baseURL = url } }
 
-// WithHTTPClient supplies a custom *http.Client (useful for timeouts,
-// proxies, or custom transports).
 func WithHTTPClient(c *http.Client) Option {
 	return func(cfg *config) { cfg.httpClient = c }
 }
 
-// WithOrganization sets the OpenAI-Organization header. Ignored by
+// WithOrganization sets the OpenAI-Organization header; ignored by
 // compatibility backends that don't implement it.
 func WithOrganization(org string) Option { return func(c *config) { c.organization = org } }
 
-// WithProviderID overrides the Info().ID string. Useful when a compat
-// backend (e.g. Groq, Ollama) wants to identify itself distinctly in the
-// event log. Defaults to "openai".
+// WithProviderID overrides the Info().ID, useful when a compat backend
+// (Groq, Ollama, ...) wants a distinct label in the event log.
 func WithProviderID(id string) Option { return func(c *config) { c.providerID = id } }
 
-// WithAPIVersion overrides the Info().APIVersion string. Defaults to "v1".
 func WithAPIVersion(v string) Option { return func(c *config) { c.apiVersion = v } }
 
 type openaiProvider struct {

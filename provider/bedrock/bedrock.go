@@ -17,10 +17,9 @@ import (
 
 const defaultAPIVersion = bedrockruntime.ServiceAPIVersion
 
-// New constructs a Provider that talks to Amazon Bedrock Runtime.
-//
-// If WithAWSConfig is not supplied, New loads AWS's default configuration
-// chain. Set WithRegion when the environment does not already provide one.
+// New constructs a Provider for Amazon Bedrock Runtime. Without
+// WithAWSConfig, loads AWS's default configuration chain; pair with
+// WithRegion if the environment doesn't already provide one.
 func New(opts ...Option) (provider.Provider, error) {
 	cfg := config{
 		providerID: "bedrock",
@@ -61,7 +60,6 @@ func New(opts ...Option) (provider.Provider, error) {
 	return &bedrockProvider{cfg: cfg}, nil
 }
 
-// Option configures the Bedrock provider.
 type Option func(*config)
 
 type config struct {
@@ -75,7 +73,8 @@ type config struct {
 	client       converseClient
 }
 
-// WithAWSConfig supplies a fully-loaded AWS SDK config.
+// WithAWSConfig supplies a fully-loaded AWS SDK config; bypasses the
+// default-config-chain load.
 func WithAWSConfig(cfg aws.Config) Option {
 	return func(c *config) {
 		c.awsConfig = cfg
@@ -83,23 +82,18 @@ func WithAWSConfig(cfg aws.Config) Option {
 	}
 }
 
-// WithRegion sets the AWS region used by the Bedrock client.
 func WithRegion(region string) Option { return func(c *config) { c.region = region } }
 
-// WithBaseEndpoint overrides the Bedrock Runtime base endpoint.
 func WithBaseEndpoint(endpoint string) Option {
 	return func(c *config) { c.baseEndpoint = endpoint }
 }
 
-// WithHTTPClient supplies a custom HTTP client.
 func WithHTTPClient(client bedrockruntime.HTTPClient) Option {
 	return func(c *config) { c.httpClient = client }
 }
 
-// WithProviderID overrides Info().ID. Defaults to "bedrock".
 func WithProviderID(id string) Option { return func(c *config) { c.providerID = id } }
 
-// WithAPIVersion overrides Info().APIVersion.
 func WithAPIVersion(v string) Option { return func(c *config) { c.apiVersion = v } }
 
 type bedrockProvider struct {
