@@ -44,6 +44,8 @@ see exactly where today's behavior diverges from the original recording.
   official Go MCP SDK.
 - **Tool safety**: retries, transient error classification, typed tool errors,
   max MCP output caps, and replay-safe side effects.
+- **Hermetic tests**: `starlingtest` ships a scripted provider and replay
+  assertions so agent tests run without an LLM.
 - **Inspector**: dependency-free browser UI for exploring runs and replay
   divergence.
 - **Observability**: metrics wrappers, OpenTelemetry-friendly examples, and
@@ -172,6 +174,17 @@ budget accounting.
 next, err := a.Resume(ctx, runID, "Continue with remediation steps.")
 ```
 
+The `starlingtest` package wires the same machinery into Go tests
+without touching a real model:
+
+```go
+p := &starlingtest.ScriptedProvider{Scripts: scripts}
+a := &starling.Agent{Provider: p, Log: eventlog.NewInMemory(), Config: cfg}
+res, _ := a.Run(ctx, "...")
+p.Reset()
+starlingtest.AssertReplayMatches(t, a.Log, res.RunID, a)
+```
+
 ## Providers
 
 | Provider | Package | Notes |
@@ -260,8 +273,6 @@ out, err := step.CallTool(ctx, step.ToolCall{
 go run ./cmd/starling-inspect starling.db
 ```
 
-![Inspector runs dashboard](docs/inspector/runs.webp)
-
 Loopback web UI: runs list with per-row totals, per-event timeline
 with a syntax-highlighted JSON detail pane, and a `/diff` page
 aligning any two runs side-by-side by sequence number. Dark by
@@ -269,8 +280,27 @@ default, theme toggle in the topbar, hashes and run ids are
 click-to-copy, no CDN or JS build step. Runs read-only — `Append`
 is impossible on the inspector's DB handle.
 
-Full tour and screenshots in the
-[docs site](https://github.com/jerkeyray/starling-docs).
+![Inspector run detail with timeline and JSON pane](docs/inspector/run.webp)
+
+![Inspector diff page](docs/inspector/diff.webp)
+
+## CLI
+
+`go install github.com/jerkeyray/starling/cmd/starling@latest` for the
+stock binary, or build a dual-mode binary around
+`starling.InspectCommand` / `starling.ReplayCommand` to wire your
+own agent factory.
+
+| Subcommand | What it does |
+| --- | --- |
+| `validate <db> [<runID>]` | Hash-chain + Merkle check, one run or every run. |
+| `export <db> <runID>` | Dump events as NDJSON (pipe into `jq`). |
+| `inspect [flags] <db>` | Read-only web inspector. |
+| `replay <db> <runID>` | Headless replay. Dual-mode binaries only. |
+| `migrate <db>` | Apply pending schema migrations. |
+| `schema-version <db>` | Print the on-disk schema version. |
+| `doctor [<db>]` | Health check: env vars, schema, chain validation. |
+| `--version` | Print the linked starling module version. |
 
 ## Production Checklist
 
