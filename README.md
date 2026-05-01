@@ -60,6 +60,17 @@ Pin a tag rather than tracking `main` — Starling is in beta and breaking
 changes are permitted between beta cuts. See [Release policy](#release-policy)
 and [CHANGELOG.md](CHANGELOG.md).
 
+## Documentation
+
+- [docs/getting-started.md](docs/getting-started.md) — install, your
+  first agent, tools, durable storage, replay.
+- [docs/mental-model.md](docs/mental-model.md) — what a Run is, when
+  it terminates, when to use one Run versus many, what replay
+  actually checks.
+
+More cookbooks and reference pages land progressively;
+[docs/README.md](docs/README.md) tracks the index.
+
 ## Quickstart
 
 ```go
@@ -264,7 +275,8 @@ Go server with no CDN or JavaScript build step.
 
 | Example | What it shows |
 | --- | --- |
-| [examples/m1_hello](examples/m1_hello) | Minimal agent run. |
+| [examples/hello](examples/hello) | The smallest end-to-end agent (~50 lines). Start here. |
+| [examples/m1_hello](examples/m1_hello) | Dual-mode pattern: run / inspect / replay / reset / show. |
 | [examples/incident_triage](examples/incident_triage) | End-to-end production-style workflow with budgets, replay, resume, metrics, OTel, and durable logs. |
 | [examples/mcp_tools](examples/mcp_tools) | MCP server tools adapted into Starling tools. |
 | [examples/m4_inspector_demo](examples/m4_inspector_demo) | Local run data for the inspector. |

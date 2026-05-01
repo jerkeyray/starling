@@ -18,9 +18,28 @@ type RunResult struct {
 	TotalCostUSD  float64
 	InputTokens   int64
 	OutputTokens  int64
+	CacheStats    CacheStats
 	Duration      time.Duration
 	TerminalKind  event.Kind // RunCompleted | RunFailed | RunCancelled
 	MerkleRoot    []byte
+}
+
+// CacheStats summarizes prompt-cache activity over the run, aggregated
+// from per-turn AssistantMessageCompleted events. Only Anthropic and
+// providers that surface cache token counts populate non-zero values;
+// for others CacheStats is the zero value.
+//
+// Semantics:
+//   - ReadTokens / CreateTokens: sums of CacheReadTokens and
+//     CacheCreateTokens across every turn.
+//   - Hits: number of turns whose CacheReadTokens was greater than 0.
+//   - Misses: number of turns that consumed input but did not read
+//     any cached prefix (CacheReadTokens == 0 && InputTokens > 0).
+type CacheStats struct {
+	Hits         int
+	Misses       int
+	ReadTokens   int64
+	CreateTokens int64
 }
 
 // StepEvent is the user-facing projection of one event, used by the

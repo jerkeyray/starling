@@ -24,6 +24,18 @@
   </div>
 </header>
 
+{{with .Summary}}
+<dl class="totals" aria-label="run totals">
+  <div><dt>events</dt><dd>{{.EventCount}}</dd></div>
+  <div><dt>turns</dt><dd>{{.TurnCount}}</dd></div>
+  <div><dt>tool calls</dt><dd>{{.ToolCallCount}}</dd></div>
+  <div><dt>input tok</dt><dd>{{.InputTokens}}</dd></div>
+  <div><dt>output tok</dt><dd>{{.OutputTokens}}</dd></div>
+  <div><dt>cost</dt><dd>${{printf "%.4f" .CostUSD}}</dd></div>
+  <div><dt>duration</dt><dd>{{.DurationMs}} ms</dd></div>
+</dl>
+{{end}}
+
 <section class="run-pane">
   <div class="timeline-pane">
     <h2 class="pane-label">Event timeline</h2>

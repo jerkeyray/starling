@@ -11,8 +11,8 @@ import (
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
-	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/replay"
+	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/tool"
 )
 

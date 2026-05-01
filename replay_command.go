@@ -71,13 +71,15 @@ func (c *ReplayCmd) Run(args []string) error {
 	}
 	fs := flag.NewFlagSet(c.Name, flag.ContinueOnError)
 	fs.SetOutput(c.Output)
+	force := fs.Bool("force", false, "skip the provider/model identity check (cross-provider replay)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: %s <db> <runID>\n\n", c.Name)
+		fmt.Fprintf(fs.Output(), "Usage: %s [--force] <db> <runID>\n\n", c.Name)
 		if c.Factory == nil {
 			fmt.Fprintln(fs.Output(), "Replay is not wired in this binary.")
 			fmt.Fprintln(fs.Output(), "Build a dual-mode binary that calls starling.ReplayCommand(factory).")
 		} else {
 			fmt.Fprintln(fs.Output(), "Headless replay of <runID>. Prints OK or DIVERGED; exit 1 on divergence.")
+			fmt.Fprintln(fs.Output(), "--force bypasses the provider/model identity check.")
 		}
 	}
 	if err := fs.Parse(args); err != nil {
@@ -103,7 +105,12 @@ func (c *ReplayCmd) Run(args []string) error {
 		return fmt.Errorf("build agent: %w", err)
 	}
 
-	err = replay.Verify(ctx, store, fs.Arg(1), agent)
+	var opts []replay.Option
+	if *force {
+		opts = append(opts, replay.WithForceProvider())
+	}
+
+	err = replay.Verify(ctx, store, fs.Arg(1), agent, opts...)
 	switch {
 	case err == nil:
 		fmt.Fprintln(c.Output, "OK: replay matches recorded log")
@@ -111,6 +118,9 @@ func (c *ReplayCmd) Run(args []string) error {
 	case errors.Is(err, replay.ErrNonDeterminism):
 		fmt.Fprintf(c.Output, "DIVERGED: %v\n", err)
 		return fmt.Errorf("%w: %v", ErrNonDeterminism, err)
+	case errors.Is(err, replay.ErrProviderModelMismatch):
+		fmt.Fprintf(c.Output, "REFUSED: %v\n", err)
+		return err
 	default:
 		return err
 	}

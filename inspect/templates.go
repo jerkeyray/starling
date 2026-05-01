@@ -50,6 +50,7 @@ func mustParseTemplates(fsys embed.FS) *templates {
 		"ui/runs.html",
 		"ui/run.html",
 		"ui/replay.html",
+		"ui/diff.html",
 	}
 	partials := []string{
 		"ui/event_detail.html",

@@ -41,6 +41,71 @@ func kindsOf(evs []event.Event) []event.Kind {
 
 // ---- tests ---------------------------------------------------------------
 
+func TestAgent_RunResult_CacheStats_AggregatesAcrossTurns(t *testing.T) {
+	// Two turns: turn 1 reads from cache (a hit + writes a fresh
+	// suffix); turn 2 reads nothing (a miss). Verifies sums and
+	// hit/miss counts.
+	mkUsage := func(in, out, read, create int64) *provider.UsageUpdate {
+		return &provider.UsageUpdate{
+			InputTokens:       in,
+			OutputTokens:      out,
+			CacheReadTokens:   read,
+			CacheCreateTokens: create,
+		}
+	}
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
+		{
+			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
+			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"x"}`}},
+			{Kind: provider.ChunkToolUseEnd, ToolUse: &provider.ToolUseChunk{CallID: "c1"}},
+			{Kind: provider.ChunkUsage, Usage: mkUsage(50, 10, 200, 80)},
+			{Kind: provider.ChunkEnd, StopReason: "tool_use"},
+		},
+		{
+			{Kind: provider.ChunkText, Text: "done"},
+			{Kind: provider.ChunkUsage, Usage: mkUsage(40, 5, 0, 0)},
+			{Kind: provider.ChunkEnd, StopReason: "stop"},
+		},
+	}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+
+	a := &starling.Agent{
+		Provider: p,
+		Tools:    []tool.Tool{echoTool()},
+		Log:      log,
+		Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
+	}
+	res, err := a.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := starling.CacheStats{Hits: 1, Misses: 1, ReadTokens: 200, CreateTokens: 80}
+	if res.CacheStats != want {
+		t.Fatalf("CacheStats = %+v, want %+v", res.CacheStats, want)
+	}
+}
+
+func TestAgent_RunResult_CacheStats_ZeroWhenProviderSilent(t *testing.T) {
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
+		{
+			{Kind: provider.ChunkText, Text: "ok"},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 0, OutputTokens: 1}},
+			{Kind: provider.ChunkEnd, StopReason: "stop"},
+		},
+	}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+	a := &starling.Agent{Provider: p, Log: log, Config: starling.Config{Model: "x"}}
+	res, err := a.Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if (res.CacheStats != starling.CacheStats{}) {
+		t.Fatalf("CacheStats = %+v, want zero", res.CacheStats)
+	}
+}
+
 func TestAgent_TextOnly_OneTurnCompletes(t *testing.T) {
 	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{

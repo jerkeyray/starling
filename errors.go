@@ -6,6 +6,7 @@ import (
 
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/replay"
 )
 
 // Sentinel errors surfaced by Agent.Run. Tests and callers route on
@@ -25,6 +26,13 @@ var (
 	// ErrNonDeterminism is returned by Replay when a re-emitted event
 	// diverges from the recording. Wraps replay.ErrNonDeterminism.
 	ErrNonDeterminism = errors.New("starling: non-determinism detected during replay")
+
+	// ErrProviderModelMismatch is returned by Replay when the agent's
+	// Provider.ID, APIVersion, or Config.Model disagree with the
+	// values recorded in RunStarted. Override with WithForceProvider.
+	// Aliased from replay.ErrProviderModelMismatch so callers that do
+	// not import the replay package can still route on it.
+	ErrProviderModelMismatch = replay.ErrProviderModelMismatch
 
 	// ErrRunNotFound is returned by Resume when the requested runID has
 	// no events in the log.

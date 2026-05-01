@@ -1,0 +1,55 @@
+{{define "content"}}
+<header class="page-head">
+  <h1>Diff
+    <span class="count">
+      {{if and .A .B}}{{.A}} ↔ {{.B}}{{end}}
+    </span>
+  </h1>
+</header>
+
+<form method="get" action="/diff" class="diff-picker">
+  <label>A <input name="a" value="{{.A}}" placeholder="run-id-a" required></label>
+  <label>B <input name="b" value="{{.B}}" placeholder="run-id-b" required></label>
+  <button type="submit">Compare</button>
+  <span class="diff-hint">Tip: open two run pages in tabs and copy their IDs.</span>
+</form>
+
+{{if .Empty}}
+  <p class="empty-title" style="margin-top:1.5rem">Pick two runs to compare.</p>
+{{else}}
+  {{with .Summary}}
+  <dl class="totals" aria-label="diff summary">
+    <div><dt>events</dt><dd>{{.Total}}</dd></div>
+    <div><dt>matching</dt><dd>{{.Matching}}</dd></div>
+    <div><dt>diverging</dt><dd>{{.Diverging}}</dd></div>
+    <div><dt>only A</dt><dd>{{.OnlyA}}</dd></div>
+    <div><dt>only B</dt><dd>{{.OnlyB}}</dd></div>
+    <div><dt>first divergence</dt><dd>{{if .FirstDivSeq}}seq {{.FirstDivSeq}}{{else}}—{{end}}</dd></div>
+  </dl>
+  {{end}}
+
+  <ol class="diff-rows">
+    {{range .Rows}}
+    <li class="diff-row diff-{{.Class}}" data-seq="{{.Seq}}">
+      <div class="diff-seq">#{{.Seq}}</div>
+      <div class="diff-side">
+        {{if .HasA}}
+          <div class="diff-kind">{{.KindA}}</div>
+          <pre class="diff-body">{{.BodyA}}</pre>
+        {{else}}
+          <div class="diff-empty">—</div>
+        {{end}}
+      </div>
+      <div class="diff-side">
+        {{if .HasB}}
+          <div class="diff-kind">{{.KindB}}</div>
+          <pre class="diff-body">{{.BodyB}}</pre>
+        {{else}}
+          <div class="diff-empty">—</div>
+        {{end}}
+      </div>
+    </li>
+    {{end}}
+  </ol>
+{{end}}
+{{end}}

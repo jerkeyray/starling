@@ -37,6 +37,50 @@ type runRow struct {
 	EventCount  uint64 // LastSeq doubles as event count: events are 1-indexed
 	StatusLabel string // "completed", "failed", "cancelled", "in progress"
 	StatusClass string // CSS class on the badge: "ok", "err", "warn", "muted"
+
+	// Aggregates surfaced from RunSummary. All zero-friendly: a run
+	// that hasn't produced an AssistantMessageCompleted yet displays
+	// blanks rather than the literal "0 / 0 tok".
+	TurnCount     int
+	ToolCallCount int
+	InputTokens   int64
+	OutputTokens  int64
+	CostUSD       float64
+	DurationMs    int64
+}
+
+// dashTotals is the summary header rendered above the runs table.
+type dashTotals struct {
+	Runs           int
+	Turns          int
+	ToolCalls      int
+	InputTokens    int64
+	OutputTokens   int64
+	TotalCostUSD   float64
+	CompletedRuns  int
+	FailedRuns     int
+	InProgressRuns int
+}
+
+func dashTotalsFromRows(rows []runRow) dashTotals {
+	var t dashTotals
+	t.Runs = len(rows)
+	for _, r := range rows {
+		t.Turns += r.TurnCount
+		t.ToolCalls += r.ToolCallCount
+		t.InputTokens += r.InputTokens
+		t.OutputTokens += r.OutputTokens
+		t.TotalCostUSD += r.CostUSD
+		switch r.StatusLabel {
+		case "completed":
+			t.CompletedRuns++
+		case "failed":
+			t.FailedRuns++
+		case "in progress":
+			t.InProgressRuns++
+		}
+	}
+	return t
 }
 
 // statusOf classifies the run's most recent event into a human label
@@ -61,12 +105,18 @@ func rowsFromSummaries(summaries []eventlog.RunSummary) []runRow {
 	for i, s := range summaries {
 		label, class := statusOf(s.TerminalKind)
 		out[i] = runRow{
-			RunID:       s.RunID,
-			Started:     s.StartedAt.Local().Format("2006-01-02 15:04:05"),
-			StartedISO:  s.StartedAt.UTC().Format(time.RFC3339),
-			EventCount:  s.LastSeq,
-			StatusLabel: label,
-			StatusClass: class,
+			RunID:         s.RunID,
+			Started:       s.StartedAt.Local().Format("2006-01-02 15:04:05"),
+			StartedISO:    s.StartedAt.UTC().Format(time.RFC3339),
+			EventCount:    s.LastSeq,
+			StatusLabel:   label,
+			StatusClass:   class,
+			TurnCount:     s.TurnCount,
+			ToolCallCount: s.ToolCallCount,
+			InputTokens:   s.InputTokens,
+			OutputTokens:  s.OutputTokens,
+			CostUSD:       s.CostUSD,
+			DurationMs:    s.DurationMs,
 		}
 	}
 	return out

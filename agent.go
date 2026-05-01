@@ -15,8 +15,8 @@ import (
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/internal/cborenc"
-	"github.com/jerkeyray/starling/merkle"
 	"github.com/jerkeyray/starling/internal/obs"
+	"github.com/jerkeyray/starling/merkle"
 	"github.com/jerkeyray/starling/provider"
 	"github.com/jerkeyray/starling/replay"
 	"github.com/jerkeyray/starling/step"
@@ -539,9 +539,15 @@ func (a *Agent) buildResult(runID string, startWall time.Time, term event.Kind) 
 		TotalCostUSD:  stats.TotalCostUSD,
 		InputTokens:   stats.InputTokens,
 		OutputTokens:  stats.OutputTokens,
-		Duration:      time.Since(startWall),
-		TerminalKind:  term,
-		MerkleRoot:    root,
+		CacheStats: CacheStats{
+			Hits:         stats.CacheHits,
+			Misses:       stats.CacheMisses,
+			ReadTokens:   stats.CacheReadTokens,
+			CreateTokens: stats.CacheCreateTokens,
+		},
+		Duration:     time.Since(startWall),
+		TerminalKind: term,
+		MerkleRoot:   root,
 	}, readErr
 }
 
@@ -559,6 +565,18 @@ func (a *Agent) RunReplay(ctx context.Context, recorded []event.Event) error {
 	sink := eventlog.NewInMemory()
 	defer sink.Close()
 	return a.RunReplayInto(ctx, recorded, sink)
+}
+
+// ReplayProviderInfo reports the agent's provider/model identity so
+// the replay package can compare it against the recording's
+// RunStarted event before re-executing. Implements
+// replay.ProviderInspector.
+func (a *Agent) ReplayProviderInfo() (providerID, apiVersion, modelID string) {
+	if a == nil || a.Provider == nil {
+		return "", "", a.Config.Model
+	}
+	info := a.Provider.Info()
+	return info.ID, info.APIVersion, a.Config.Model
 }
 
 // RunReplayInto is RunReplay with a caller-supplied sink log instead
@@ -631,12 +649,16 @@ func (a *Agent) validate() error {
 // stats is the aggregated view computed from the event stream for the
 // terminal event payload and RunResult.
 type stats struct {
-	TurnCount     uint32
-	ToolCallCount uint32
-	InputTokens   int64
-	OutputTokens  int64
-	TotalCostUSD  float64
-	FinalText     string
+	TurnCount         uint32
+	ToolCallCount     uint32
+	InputTokens       int64
+	OutputTokens      int64
+	TotalCostUSD      float64
+	CacheReadTokens   int64
+	CacheCreateTokens int64
+	CacheHits         int
+	CacheMisses       int
+	FinalText         string
 }
 
 func aggregateStats(evs []event.Event) stats {
@@ -655,6 +677,14 @@ func aggregateStats(evs []event.Event) stats {
 			s.InputTokens += amc.InputTokens
 			s.OutputTokens += amc.OutputTokens
 			s.TotalCostUSD += amc.CostUSD
+			s.CacheReadTokens += amc.CacheReadTokens
+			s.CacheCreateTokens += amc.CacheCreateTokens
+			switch {
+			case amc.CacheReadTokens > 0:
+				s.CacheHits++
+			case amc.InputTokens > 0:
+				s.CacheMisses++
+			}
 			s.FinalText = amc.Text
 		}
 	}

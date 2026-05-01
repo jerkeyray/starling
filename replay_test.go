@@ -121,6 +121,70 @@ func TestReplay_DivergentToolReturnsErrNonDeterminism(t *testing.T) {
 	}
 }
 
+func TestReplay_RefusesOnProviderMismatch(t *testing.T) {
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
+		{
+			{Kind: provider.ChunkText, Text: "ok"},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+			{Kind: provider.ChunkEnd, StopReason: "stop"},
+		},
+	}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+
+	a := &starling.Agent{
+		Provider: p,
+		Log:      log,
+		Config:   starling.Config{Model: "m1"},
+	}
+	res, err := a.Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	p.Reset()
+	a2 := &starling.Agent{
+		Provider: p,
+		Log:      log,
+		Config:   starling.Config{Model: "m2"},
+	}
+	err = starling.Replay(context.Background(), log, res.RunID, a2)
+	if !errors.Is(err, starling.ErrProviderModelMismatch) {
+		t.Fatalf("err = %v, want ErrProviderModelMismatch", err)
+	}
+}
+
+func TestReplay_WithForceProvider_BypassesCheck(t *testing.T) {
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
+		{
+			{Kind: provider.ChunkText, Text: "ok"},
+			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
+			{Kind: provider.ChunkEnd, StopReason: "stop"},
+		},
+	}}
+	log := eventlog.NewInMemory()
+	defer log.Close()
+	a := &starling.Agent{Provider: p, Log: log, Config: starling.Config{Model: "m1"}}
+	res, err := a.Run(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	p.Reset()
+	a2 := &starling.Agent{Provider: p, Log: log, Config: starling.Config{Model: "m2"}}
+	// WithForceProvider bypasses the upfront identity check. The
+	// byte-for-byte replay still trips on the divergent RunStarted
+	// payload (ModelID m2 vs m1) — but that surfaces as
+	// ErrNonDeterminism instead of ErrProviderModelMismatch.
+	err = starling.Replay(context.Background(), log, res.RunID, a2, starling.WithForceProvider())
+	if errors.Is(err, starling.ErrProviderModelMismatch) {
+		t.Fatalf("force did not bypass identity check: %v", err)
+	}
+	if !errors.Is(err, starling.ErrNonDeterminism) {
+		t.Fatalf("err = %v, want ErrNonDeterminism (RunStarted payload diverges)", err)
+	}
+}
+
 func TestReplay_UnknownRunReturnsError(t *testing.T) {
 	log := eventlog.NewInMemory()
 	defer log.Close()

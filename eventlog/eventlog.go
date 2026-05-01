@@ -18,11 +18,26 @@ import (
 // enough to populate a list-of-runs view without loading every event.
 // TerminalKind is the most recent event's kind; for an in-progress run
 // it won't satisfy Kind.IsTerminal.
+//
+// Aggregates (TurnCount, CostUSD, ...) are derived from the run's
+// AssistantMessageCompleted and ToolCallScheduled events. They are
+// best-effort: a backend may return zeros for in-progress runs whose
+// totals haven't been recomputed since the last append. For a
+// guaranteed point-in-time snapshot, call Read and aggregate.
 type RunSummary struct {
 	RunID        string
 	StartedAt    time.Time
 	LastSeq      uint64
 	TerminalKind event.Kind
+
+	// Aggregates over the run's events. Zero values are valid for runs
+	// that haven't produced an AssistantMessageCompleted yet.
+	TurnCount     int
+	ToolCallCount int
+	InputTokens   int64
+	OutputTokens  int64
+	CostUSD       float64
+	DurationMs    int64 // wall time from RunStarted to last event; 0 while still running's first event
 }
 
 // EventLog is an append-only, per-run ledger of events.

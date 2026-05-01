@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 )
 
@@ -31,6 +32,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		"Total":  len(summaries),
 		"Status": statusFilter,
 		"Query":  query,
+		"Totals": dashTotalsFromRows(rows),
 	})
 }
 
@@ -82,6 +84,19 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request, runID string)
 	// empty on first paint. HTMX swaps it on subsequent clicks.
 	initial := detailFromEvent(runID, events[0])
 
+	// Per-run summary header: same numbers the dashboard shows for
+	// this row, computed once so the run page is a self-contained view.
+	turns, tools, inTok, outTok, cost, durNs := aggregateRunForView(events)
+	summary := runSummary{
+		EventCount:    uint64(len(events)),
+		TurnCount:     turns,
+		ToolCallCount: tools,
+		InputTokens:   inTok,
+		OutputTokens:  outTok,
+		CostUSD:       cost,
+		DurationMs:    durNs / 1_000_000,
+	}
+
 	s.tpl.render(w, "run.html", http.StatusOK, map[string]any{
 		"Title":         "Run " + runID,
 		"RunID":         runID,
@@ -91,7 +106,52 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request, runID string)
 		"ReplayEnabled": s.ReplayEnabled(),
 		"TerminalKind":  terminalKind,
 		"LastSeq":       lastSeq,
+		"Summary":       summary,
 	})
+}
+
+// runSummary backs the top-of-page totals strip on the run detail
+// view. Same shape as the dashboard's per-row aggregates.
+type runSummary struct {
+	EventCount    uint64
+	TurnCount     int
+	ToolCallCount int
+	InputTokens   int64
+	OutputTokens  int64
+	CostUSD       float64
+	DurationMs    int64
+}
+
+// aggregateRunForView is the inspector-side counterpart of
+// eventlog.aggregateRun. We don't import the unexported helper to
+// avoid widening the eventlog public surface for one consumer; the
+// duplication is small and stable.
+func aggregateRunForView(evs []event.Event) (turns, tools int, inputTokens, outputTokens int64, costUSD float64, durationNs int64) {
+	if len(evs) == 0 {
+		return
+	}
+	first := evs[0]
+	last := evs[len(evs)-1]
+	if last.Timestamp >= first.Timestamp {
+		durationNs = last.Timestamp - first.Timestamp
+	}
+	for i := range evs {
+		switch evs[i].Kind {
+		case event.KindTurnStarted:
+			turns++
+		case event.KindToolCallScheduled:
+			tools++
+		case event.KindAssistantMessageCompleted:
+			amc, err := evs[i].AsAssistantMessageCompleted()
+			if err != nil {
+				continue
+			}
+			inputTokens += amc.InputTokens
+			outputTokens += amc.OutputTokens
+			costUSD += amc.CostUSD
+		}
+	}
+	return
 }
 
 // handleEventDetail returns the HTML fragment for the right pane.

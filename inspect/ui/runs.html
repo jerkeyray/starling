@@ -1,6 +1,15 @@
 {{define "content"}}
+{{$T := .Totals}}
 <header class="page-head">
   <h1>Runs <span class="count">{{len .Rows}} of {{.Total}}</span></h1>
+  <dl class="totals" aria-label="aggregate totals across listed runs">
+    <div><dt>runs</dt><dd>{{$T.Runs}}</dd></div>
+    <div><dt>turns</dt><dd>{{$T.Turns}}</dd></div>
+    <div><dt>tool calls</dt><dd>{{$T.ToolCalls}}</dd></div>
+    <div><dt>input tok</dt><dd>{{$T.InputTokens}}</dd></div>
+    <div><dt>output tok</dt><dd>{{$T.OutputTokens}}</dd></div>
+    <div><dt>cost</dt><dd>${{printf "%.4f" $T.TotalCostUSD}}</dd></div>
+  </dl>
   <div class="controls">
     <form id="search-form" method="get" action="/" role="search">
       {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
@@ -32,6 +41,12 @@
       <th>Run ID</th>
       <th>Started</th>
       <th class="num">Events</th>
+      <th class="num">Turns</th>
+      <th class="num">Tools</th>
+      <th class="num">In tok</th>
+      <th class="num">Out tok</th>
+      <th class="num">Cost</th>
+      <th class="num">Duration</th>
       <th>Status</th>
     </tr>
   </thead>
@@ -41,6 +56,12 @@
       <td><a href="/run/{{runPath .RunID}}" class="runid">{{.RunID}}</a></td>
       <td><time datetime="{{.StartedISO}}">{{.Started}}</time></td>
       <td class="num">{{.EventCount}}</td>
+      <td class="num">{{.TurnCount}}</td>
+      <td class="num">{{.ToolCallCount}}</td>
+      <td class="num">{{.InputTokens}}</td>
+      <td class="num">{{.OutputTokens}}</td>
+      <td class="num">${{printf "%.4f" .CostUSD}}</td>
+      <td class="num">{{.DurationMs}} ms</td>
       <td><span class="badge badge-{{.StatusClass}}">{{.StatusLabel}}</span></td>
     </tr>
     {{end}}

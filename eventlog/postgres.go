@@ -466,6 +466,20 @@ func (p *postgresLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("eventlog/postgres: list runs rows: %w", err)
 	}
+	// See sqliteLog.ListRuns for the per-run aggregate cost note.
+	for i := range out {
+		evs, err := p.Read(ctx, out[i].RunID)
+		if err != nil {
+			return nil, fmt.Errorf("eventlog/postgres: list runs aggregate: %w", err)
+		}
+		t, tc, in, oTok, cost, durNs := aggregateRun(evs)
+		out[i].TurnCount = t
+		out[i].ToolCallCount = tc
+		out[i].InputTokens = in
+		out[i].OutputTokens = oTok
+		out[i].CostUSD = cost
+		out[i].DurationMs = durNs / 1_000_000
+	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].StartedAt.After(out[j].StartedAt)
 	})

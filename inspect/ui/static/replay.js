@@ -98,6 +98,7 @@
       const open = () => openDivergence(step);
       prodRow.addEventListener("click", open);
       recRow.addEventListener("click", open);
+      flashDivergenceToast(step);
     } else if (step.Produced && step.Produced.Kind != null) {
       prodRow.append(rowSpans("#" + (idx + 1), step.Produced));
     } else {
@@ -121,6 +122,34 @@
     kindSpan.textContent = kindName(ev.Kind);
     frag.append(seqSpan, kindSpan);
     return frag;
+  }
+
+  // Toast: auto-appearing banner on divergence so the user gets a
+  // visible signal even if they're scrolled away from the row that
+  // tripped. Click the toast (or the diverged row) to open the
+  // detail dialog. Auto-dismisses after a few seconds; clicking the
+  // ✕ closes it sooner. Only one toast is shown at a time.
+  function flashDivergenceToast(step) {
+    document.querySelectorAll(".diverge-toast").forEach((n) => n.remove());
+    const t = document.createElement("div");
+    t.className = "diverge-toast";
+    t.setAttribute("role", "alert");
+    t.innerHTML =
+      "<strong>✗ replay diverged</strong>" +
+      "<span class='diverge-toast-reason'></span>" +
+      "<button class='diverge-toast-close' aria-label='dismiss'>✕</button>";
+    t.querySelector(".diverge-toast-reason").textContent =
+      " at step " + step.Index + " — " + oneLine(step.DivergenceReason || "(no reason)");
+    t.addEventListener("click", (ev) => {
+      if (ev.target instanceof Element && ev.target.classList.contains("diverge-toast-close")) {
+        t.remove();
+        return;
+      }
+      openDivergence(step);
+    });
+    document.body.appendChild(t);
+    setTimeout(() => { t.classList.add("diverge-toast-fade"); }, 6000);
+    setTimeout(() => { t.remove(); }, 7500);
   }
 
   function divergenceRow(step) {

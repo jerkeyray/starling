@@ -36,6 +36,29 @@ compatibility promise until the first GA (`v1.0.0`) tag.
   their SDK errors so callers can write retry policy via `errors.Is`.
 - `starling.Version` constant and `--version` / `-v` / `version`
   arguments on both `cmd/starling` and `cmd/starling-inspect`.
+- `RunResult.CacheStats` (`Hits`, `Misses`, `ReadTokens`,
+  `CreateTokens`) aggregated from per-turn cache token counts.
+- `Replay` refuses to run when the agent's
+  `Provider.ID`/`APIVersion`/`Config.Model` disagree with the
+  recording's `RunStarted`. Returns `ErrProviderModelMismatch`;
+  override with `WithForceProvider()` (or `--force` on
+  `starling replay`). The check trips before any turn executes.
+- `RunSummary` carries per-run aggregates (`TurnCount`,
+  `ToolCallCount`, `InputTokens`, `OutputTokens`, `CostUSD`,
+  `DurationMs`) so dashboards no longer have to re-aggregate event
+  streams. Computed on `ListRuns` for every backend.
+- Inspector dashboard: totals strip above the runs table and a
+  per-row breakdown (events, turns, tools, tokens, cost, duration);
+  per-run page gets the same totals header.
+- Inspector run-diff view at `/diff?a=<runID>&b=<runID>` aligns two
+  runs by sequence number, renders payloads side-by-side, and
+  surfaces the first divergence. New "Diff" link in the topbar.
+- Inspector replay divergence toast: when a `Diverged=true` step
+  arrives over the SSE stream, an auto-dismissing banner flashes so
+  the user sees it even if they're scrolled away from the row.
+- `examples/hello/` — minimal ~50-line first-agent.
+- `docs/` directory: `getting-started.md` and `mental-model.md`
+  (Wave A). More waves to follow.
 
 ## [v0.1.0-beta.1] - 2026-04-30
 

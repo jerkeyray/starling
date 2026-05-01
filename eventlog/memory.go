@@ -261,11 +261,18 @@ func (m *memoryLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 		}
 		first := rs.events[0]
 		last := rs.events[len(rs.events)-1]
+		turns, tools, inTok, outTok, cost, durNs := aggregateRun(rs.events)
 		out = append(out, RunSummary{
-			RunID:        runID,
-			StartedAt:    time.Unix(0, first.Timestamp),
-			LastSeq:      last.Seq,
-			TerminalKind: last.Kind,
+			RunID:         runID,
+			StartedAt:     time.Unix(0, first.Timestamp),
+			LastSeq:       last.Seq,
+			TerminalKind:  last.Kind,
+			TurnCount:     turns,
+			ToolCallCount: tools,
+			InputTokens:   inTok,
+			OutputTokens:  outTok,
+			CostUSD:       cost,
+			DurationMs:    durNs / 1_000_000,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

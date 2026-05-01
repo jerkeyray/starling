@@ -465,6 +465,25 @@ func (s *sqliteLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("eventlog/sqlite: list runs rows: %w", err)
 	}
+	// Per-run aggregates: re-read each run and fold its events. The
+	// row count is bounded by the number of distinct runs; payloads
+	// are CBOR-decoded only for AssistantMessageCompleted, which is
+	// O(turns) per run. Acceptable for interactive list views; if a
+	// log grows past tens of thousands of runs the inspector should
+	// paginate instead of scaling this loop.
+	for i := range out {
+		evs, err := s.Read(ctx, out[i].RunID)
+		if err != nil {
+			return nil, fmt.Errorf("eventlog/sqlite: list runs aggregate: %w", err)
+		}
+		t, tc, in, oTok, cost, durNs := aggregateRun(evs)
+		out[i].TurnCount = t
+		out[i].ToolCallCount = tc
+		out[i].InputTokens = in
+		out[i].OutputTokens = oTok
+		out[i].CostUSD = cost
+		out[i].DurationMs = durNs / 1_000_000
+	}
 	// Newest first.
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].StartedAt.After(out[j].StartedAt)

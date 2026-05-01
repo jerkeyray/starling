@@ -98,6 +98,7 @@ func (s *Server) ReplayEnabled() bool { return s.replayer != nil }
 func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleRuns)
 	s.mux.HandleFunc("/run/", s.dispatchRun)
+	s.mux.HandleFunc("/diff", s.handleDiff)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
 }
 
