@@ -1,19 +1,27 @@
-<div align="center">
+<p align="center">
+  <picture>
+    <source srcset="docs/brand/logo-dark.svg" media="(prefers-color-scheme: dark)">
+    <source srcset="docs/brand/logo-light.svg" media="(prefers-color-scheme: light)">
+    <img src="docs/brand/logo-dark.svg" alt="starling" width="320" />
+  </picture>
+</p>
 
-```text
-███████╗████████╗ █████╗ ██████╗ ██╗     ██╗███╗   ██╗ ██████╗
-██╔════╝╚══██╔══╝██╔══██╗██╔══██╗██║     ██║████╗  ██║██╔════╝
-███████╗   ██║   ███████║██████╔╝██║     ██║██╔██╗ ██║██║  ███╗
-╚════██║   ██║   ██╔══██║██╔══██╗██║     ██║██║╚██╗██║██║   ██║
-███████║   ██║   ██║  ██║██║  ██║███████╗██║██║ ╚████║╚██████╔╝
-╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝
-```
+<p align="center">
+  <strong>Event-sourced agent runtime for Go.</strong>
+</p>
 
-**Event-sourced ADK for Go**
+<p align="center">
+  Replayable runs · Tamper-evident logs · Provider-neutral tools · Production debugging
+</p>
 
-Replayable runs · Tamper-evident logs · Provider-neutral tools · Production debugging
+<p align="center">
+  <a href="docs/getting-started.md">Getting started</a> ·
+  <a href="docs/mental-model.md">Mental model</a> ·
+  <a href="docs/faq.md">FAQ</a> ·
+  <a href="examples/hello">Hello example</a>
+</p>
 
-</div>
+---
 
 Starling is a Go runtime for building LLM agents where every run is recorded as
 an append-only, BLAKE3-chained, Merkle-rooted event log. When an agent fails in

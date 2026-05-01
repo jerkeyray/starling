@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 56" width="320" height="56" fill="none">
+  <g transform="translate(8, 12)">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#00add8" stroke-width="2.4" stroke-linecap="square" stroke-linejoin="miter">
+      <path d="M3 12a9 9 0 1 0 3-6.7"/>
+      <polyline points="3 3 3 8 8 8"/>
+    </svg>
+  </g>
+  <text x="56" y="38"
+        font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="28"
+        font-weight="600"
+        letter-spacing="-0.02em"
+        fill="#f4f4f5">starling</text>
+</svg>
