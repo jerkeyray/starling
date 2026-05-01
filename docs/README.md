@@ -13,10 +13,20 @@ going on.
   terminates, how to think about Runs vs Turns vs Resume vs new
   Runs, what replay actually checks.
 
+## Cookbook
+
+- [cookbook/branching.md](cookbook/branching.md) — WAL-safe SQLite
+  fork via `eventlog.ForkSQLite`, with a runnable example.
+- [cookbook/manual-writes.md](cookbook/manual-writes.md) — write
+  events directly without `Agent.Run`, using the public `merkle`
+  package for the terminal root.
+- [cookbook/multi-turn.md](cookbook/multi-turn.md) — chat-style
+  workflows: one Run per user message, prior reply threaded as
+  context.
+
 ## Coming next
 
-- `cookbook/` — branching, forking, manual event writing,
-  multi-turn conversations, deterministic test providers.
+- More cookbook entries: deterministic test providers, MCP tools.
 - `reference/` — every event Kind, every payload field, the
   step-package primitives, the cost model, tool lifecycle, replay
   internals, metrics names, and the SQLite save-file layout.

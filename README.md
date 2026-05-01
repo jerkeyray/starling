@@ -277,6 +277,9 @@ Go server with no CDN or JavaScript build step.
 | --- | --- |
 | [examples/hello](examples/hello) | The smallest end-to-end agent (~50 lines). Start here. |
 | [examples/m1_hello](examples/m1_hello) | Dual-mode pattern: run / inspect / replay / reset / show. |
+| [examples/multi_turn](examples/multi_turn) | Chat-style workflow: one Run per user message. |
+| [examples/branching](examples/branching) | `eventlog.ForkSQLite` to split a recorded run into a counterfactual branch. |
+| [examples/manual_writes](examples/manual_writes) | Writing events without `Agent.Run`, including the Merkle root. |
 | [examples/incident_triage](examples/incident_triage) | End-to-end production-style workflow with budgets, replay, resume, metrics, OTel, and durable logs. |
 | [examples/mcp_tools](examples/mcp_tools) | MCP server tools adapted into Starling tools. |
 | [examples/m4_inspector_demo](examples/m4_inspector_demo) | Local run data for the inspector. |

@@ -13,6 +13,7 @@
     <span class="ev-time">{{.Time}}</span>
     <span class="ev-kind">{{.Kind}}</span>
     <span class="ev-summary">{{.Summary}}</span>
+    {{if .Annotation}}<span class="ev-annot">{{.Annotation}}</span>{{end}}
   </a>
 </li>
 {{- end}}

@@ -51,6 +51,8 @@ func main() {
 		err = starling.MigrateCommand().Run(args)
 	case "schema-version":
 		err = starling.SchemaVersionCommand().Run(args)
+	case "doctor":
+		err = starling.DoctorCommand().Run(args)
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 		return
@@ -75,6 +77,7 @@ func usage(w *os.File) {
 	fmt.Fprintln(w, "  replay     Headless replay of one run. Requires a dual-mode binary.")
 	fmt.Fprintln(w, "  migrate    Apply pending schema migrations to a SQLite event log.")
 	fmt.Fprintln(w, "  schema-version  Print the schema version of a SQLite event log.")
+	fmt.Fprintln(w, "  doctor          Quick health check: version, env vars, schema, validation.")
 	fmt.Fprintln(w, "  version         Print this binary's Starling version.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Run 'starling <command> -h' for per-command flags.")

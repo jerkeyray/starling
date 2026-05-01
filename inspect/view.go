@@ -155,6 +155,38 @@ func filterByQuery(rows []runRow, q string) []runRow {
 	return out
 }
 
+// filterByPreset applies one of the named preset chips. Empty preset
+// returns rows unchanged. Recognised: "tools" (rows with at least one
+// tool call), "hour" (rows started within the last hour).
+func filterByPreset(rows []runRow, preset string, now time.Time) []runRow {
+	switch preset {
+	case "":
+		return rows
+	case "tools":
+		out := make([]runRow, 0, len(rows))
+		for _, r := range rows {
+			if r.ToolCallCount > 0 {
+				out = append(out, r)
+			}
+		}
+		return out
+	case "hour":
+		cutoff := now.Add(-time.Hour)
+		out := make([]runRow, 0, len(rows))
+		for _, r := range rows {
+			t, err := time.Parse(time.RFC3339, r.StartedISO)
+			if err != nil {
+				continue
+			}
+			if t.After(cutoff) {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	return rows
+}
+
 // eventRow is one row in the timeline pane of the run detail page.
 // Pre-computed so the template stays declarative — no calls into the
 // event package, no conditional rendering off Kind integers.
@@ -168,6 +200,11 @@ type eventRow struct {
 	CallID    string // non-empty for tool events; used for cross-link highlighting
 	DetailURL string // "/run/{id}/event/{seq}" for hx-get
 	Active    bool   // initial-render highlight; always false for SSE-streamed rows
+
+	// Annotation is a short payload-derived metric chip rendered on
+	// the timeline row itself — e.g. "$0.0024 · 1227 in / 30 out · cache 0.83".
+	// Empty for kinds with nothing useful to show.
+	Annotation string
 }
 
 // validationView renders the badge at the top of the run detail page.
@@ -305,15 +342,39 @@ func truncOneLine(s string, n int) string {
 func rowFromEvent(runID string, ev event.Event) eventRow {
 	summary, callID := summarize(ev)
 	return eventRow{
-		Seq:       ev.Seq,
-		SeqLabel:  fmt.Sprintf("#%04d", ev.Seq),
-		Time:      time.Unix(0, ev.Timestamp).Local().Format("15:04:05.000"),
-		Kind:      ev.Kind.String(),
-		Family:    kindFamily(ev.Kind),
-		Summary:   summary,
-		CallID:    callID,
-		DetailURL: fmt.Sprintf("/run/%s/event/%d", runPathEscape(runID), ev.Seq),
+		Seq:        ev.Seq,
+		SeqLabel:   fmt.Sprintf("#%04d", ev.Seq),
+		Time:       time.Unix(0, ev.Timestamp).Local().Format("15:04:05.000"),
+		Kind:       ev.Kind.String(),
+		Family:     kindFamily(ev.Kind),
+		Summary:    summary,
+		CallID:     callID,
+		DetailURL:  fmt.Sprintf("/run/%s/event/%d", runPathEscape(runID), ev.Seq),
+		Annotation: annotateEvent(ev),
 	}
+}
+
+// annotateEvent returns a short metric chip for ev, or "" if there's
+// nothing useful to surface. Currently populated for
+// AssistantMessageCompleted (cost / tokens / cache hit ratio) and the
+// terminal kinds (run-level cost / duration when available).
+func annotateEvent(ev event.Event) string {
+	switch ev.Kind {
+	case event.KindAssistantMessageCompleted:
+		amc, err := ev.AsAssistantMessageCompleted()
+		if err != nil {
+			return ""
+		}
+		parts := []string{
+			fmt.Sprintf("$%.4f", amc.CostUSD),
+			fmt.Sprintf("%d in / %d out", amc.InputTokens, amc.OutputTokens),
+		}
+		if total := amc.CacheReadTokens + amc.InputTokens; total > 0 && amc.CacheReadTokens > 0 {
+			parts = append(parts, fmt.Sprintf("cache %.2f", float64(amc.CacheReadTokens)/float64(total)))
+		}
+		return strings.Join(parts, " · ")
+	}
+	return ""
 }
 
 // rowsFromEvents builds the timeline. Pure function.

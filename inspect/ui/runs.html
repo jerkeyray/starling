@@ -24,12 +24,16 @@
       >
     </form>
     <nav class="status-tabs" aria-label="filter by status">
-      {{$cur := .Status}}{{$q := .Query}}
+      {{$cur := .Status}}{{$q := .Query}}{{$pre := .Preset}}
       <a href="/{{if $q}}?q={{$q}}{{end}}" class="tab {{if eq $cur ""}}active{{end}}">all</a>
       <a href="/?status=completed{{if $q}}&q={{$q}}{{end}}"   class="tab {{if eq $cur "completed"}}active{{end}}">completed</a>
       <a href="/?status=failed{{if $q}}&q={{$q}}{{end}}"      class="tab {{if eq $cur "failed"}}active{{end}}">failed</a>
       <a href="/?status=cancelled{{if $q}}&q={{$q}}{{end}}"   class="tab {{if eq $cur "cancelled"}}active{{end}}">cancelled</a>
       <a href="/?status=in+progress{{if $q}}&q={{$q}}{{end}}" class="tab {{if eq $cur "in progress"}}active{{end}}">in progress</a>
+    </nav>
+    <nav class="preset-chips" aria-label="filter presets">
+      <a href="/?preset=tools{{if $cur}}&status={{$cur}}{{end}}{{if $q}}&q={{$q}}{{end}}" class="chip {{if eq $pre "tools"}}active{{end}}">with tool calls</a>
+      <a href="/?preset=hour{{if $cur}}&status={{$cur}}{{end}}{{if $q}}&q={{$q}}{{end}}" class="chip {{if eq $pre "hour"}}active{{end}}">last hour</a>
     </nav>
   </div>
 </header>

@@ -132,6 +132,31 @@ h1 { font-size: 1.35rem; margin-top: 0; letter-spacing: -0.01em; }
   padding: 0 0.25rem;
 }
 
+/* inline metric annotation on event rows (cost / tokens / cache ratio) */
+.ev-annot {
+  margin-left: auto;
+  padding-left: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* preset filter chips on the runs dashboard */
+.preset-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.preset-chips .chip {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.preset-chips .chip:hover  { color: var(--fg); }
+.preset-chips .chip.active { color: var(--fg); border-color: var(--fg); }
+
 /* topbar nav links next to the brand */
 .topnav { display: flex; gap: 0.75rem; margin-left: 1rem; }
 .topnav a { color: var(--muted); text-decoration: none; font-size: 0.9rem; }

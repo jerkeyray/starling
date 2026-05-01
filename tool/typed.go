@@ -20,7 +20,11 @@ func Typed[In, Out any](
 	var zero In
 	inType := reflect.TypeOf(zero)
 	if inType == nil || inType.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("tool.Typed[%s]: In must be a struct (got %v); LLM tool schemas are objects at the top level", name, inType))
+		got := "nil"
+		if inType != nil {
+			got = inType.String()
+		}
+		panic(fmt.Sprintf("tool.Typed[%s]: In must be a struct; got %s — top-level tool inputs must be JSON objects so the model can fill named fields. Wrap your value in a struct (e.g. `struct { Value %s }`).", name, got, got))
 	}
 	schema := generateSchema(inType)
 	return &typedTool[In, Out]{

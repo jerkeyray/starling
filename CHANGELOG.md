@@ -59,6 +59,29 @@ compatibility promise until the first GA (`v1.0.0`) tag.
 - `examples/hello/` — minimal ~50-line first-agent.
 - `docs/` directory: `getting-started.md` and `mental-model.md`
   (Wave A). More waves to follow.
+- `tool.Wrap(t, ...Middleware)` — compose middleware around a tool's
+  Execute without re-implementing `tool.Tool`. Outer middleware runs
+  first; short-circuiting middleware can skip inner layers entirely.
+- `Agent.RunStream` — typed AgentEvent stream
+  (`TextDelta`, `ToolCallStarted`, `ToolCallEnded`, `Done`) layered
+  over the existing `Stream`. Always closes after a single `Done`.
+- `cmd/starling doctor` — quick health check covering binary
+  version, provider env vars, schema version, and chain validation
+  on a supplied SQLite log.
+- Inspector preset chips on the runs dashboard: "with tool calls"
+  and "last hour" alongside the existing status tabs.
+- Inline metric annotation on inspector timeline rows
+  (cost / tokens / cache ratio) for `AssistantMessageCompleted`.
+- Cookbook examples + docs: branching (paired with
+  `eventlog.ForkSQLite`), manual event writing (paired with the
+  exported `merkle` package), and multi-turn conversations (one Run
+  per user message). New runnable directories under `examples/` and
+  doc pages under `docs/cookbook/`.
+- `tool.Typed` panic message now states "In must be a struct; got X
+  — top-level tool inputs must be JSON objects" with a wrap-it
+  suggestion.
+- `inspect <too many args>` returns a precise error instead of the
+  misleading "missing <db> argument".
 
 ## [v0.1.0-beta.1] - 2026-04-30
 

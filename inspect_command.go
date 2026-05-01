@@ -121,9 +121,15 @@ func (c *InspectCmd) Run(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
+	switch fs.NArg() {
+	case 1:
+		// ok
+	case 0:
 		fs.Usage()
 		return errors.New("missing <db> argument")
+	default:
+		fs.Usage()
+		return fmt.Errorf("expected exactly one <db> argument; got %d: %v", fs.NArg(), fs.Args())
 	}
 	dbPath := fs.Arg(0)
 

@@ -3,6 +3,7 @@ package inspect
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
@@ -25,6 +26,8 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	rows = filterByStatus(rows, statusFilter)
 	query := r.URL.Query().Get("q")
 	rows = filterByQuery(rows, query)
+	preset := r.URL.Query().Get("preset")
+	rows = filterByPreset(rows, preset, time.Now())
 
 	s.tpl.render(w, "runs.html", http.StatusOK, map[string]any{
 		"Title":  "Runs",
@@ -32,6 +35,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		"Total":  len(summaries),
 		"Status": statusFilter,
 		"Query":  query,
+		"Preset": preset,
 		"Totals": dashTotalsFromRows(rows),
 	})
 }
