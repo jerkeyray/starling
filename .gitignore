@@ -85,10 +85,21 @@ scratch/
 tmp/
 .tmp/
 
-# Planning docs / milestone scratch — kept locally, never published
+# Planning docs / milestone scratch - kept locally, never published
 temp_docs/
+temp_notes/
 
 # Stray binaries built by `go build ./...` from repo root
 /m1_hello
 /starling-inspect
 /cmd/starling-inspect/starling-inspect
+# Compiled example binaries (each example has a sibling main.go that
+# go build ./... will drop here). Listed by basename so any new
+# example doesn't slip through.
+/branching
+/hello
+/incident_triage
+/manual_writes
+/multi_turn
+/m4_inspector_demo
+/mcp_tools

@@ -345,6 +345,37 @@ own agent factory.
 | [examples/mcp_tools](examples/mcp_tools) | MCP server tools adapted into Starling tools. |
 | [examples/m4_inspector_demo](examples/m4_inspector_demo) | Local run data for the inspector. |
 
+## Code layout
+
+`package starling` lives at the module root - that's a Go convention,
+not a layout choice. The interesting parts are under sub-packages.
+
+```
+.
+├── agent.go, config.go, errors.go, result.go,    Core API: Agent, Config,
+│   stream.go, runstream.go, resume.go,           RunResult, Resume, replay
+│   replay_api.go, metrics.go, version.go,        wrappers, sentinel errors,
+│   *_command.go, *_test.go                       CLI command helpers, tests.
+│
+├── bench/             benchmarks
+├── budget/            pricing tables, USD/token caps
+├── cmd/
+│   ├── starling/         stock CLI (validate / export / inspect / replay / migrate / doctor)
+│   └── starling-inspect/ standalone inspector binary
+├── docs/              prose docs (getting-started, mental-model, cookbook, reference)
+├── event/             Event / Kind types, per-kind payload schemas
+├── eventlog/          append-only log: in-memory / SQLite / Postgres
+├── examples/          runnable agents (start with examples/hello)
+├── inspect/           inspector server + UI templates + static assets
+├── internal/          unexported helpers (cborenc, obs)
+├── merkle/            public BLAKE3 Merkle helpers
+├── provider/          OpenAI / Anthropic / Gemini / Bedrock / OpenRouter adapters
+├── replay/            replay re-execution + Stream
+├── starlingtest/      test helpers (ScriptedProvider, AssertReplayMatches)
+├── step/              step.Now / step.Random / step.SideEffect, CallTool
+└── tool/              Tool interface, Typed[In,Out], Wrap middleware, MCP client
+```
+
 ## Development
 
 ```bash
