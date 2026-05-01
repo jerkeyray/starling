@@ -82,6 +82,10 @@ compatibility promise until the first GA (`v1.0.0`) tag.
   suggestion.
 - `inspect <too many args>` returns a precise error instead of the
   misleading "missing <db> argument".
+- `docs/` Wave B: full reference pages (`events.md`,
+  `step-primitives.md`, `cost-model.md`, `tools.md`, `replay.md`,
+  `metrics.md`, `save-file.md`) plus `docs/faq.md`. README and
+  `docs/README.md` indices updated to match.
 
 ## [v0.1.0-beta.1] - 2026-04-30
 

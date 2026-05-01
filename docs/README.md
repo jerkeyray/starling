@@ -24,10 +24,28 @@ going on.
   workflows: one Run per user message, prior reply threaded as
   context.
 
+## Reference
+
+- [reference/events.md](reference/events.md) — every event `Kind`,
+  payload shape, and the `Annotations` keys providers read.
+- [reference/step-primitives.md](reference/step-primitives.md) —
+  `step.Now`, `step.Random`, `step.SideEffect`.
+- [reference/cost-model.md](reference/cost-model.md) — built-in
+  pricing, cache multipliers, `budget.RegisterPricing`.
+- [reference/tools.md](reference/tools.md) — `Tool` interface,
+  `tool.Typed`, `tool.Wrap` middleware, retries, replay rules.
+- [reference/replay.md](reference/replay.md) — what `Replay`
+  compares, divergence classes, dual-mode binaries.
+- [reference/metrics.md](reference/metrics.md) — every Prometheus
+  name and OpenTelemetry span emitted.
+- [reference/save-file.md](reference/save-file.md) — SQLite
+  schema, WAL footgun, CBOR payload layout.
+
+## FAQ
+
+- [faq.md](faq.md) — quick answers to the recurring questions.
+
 ## Coming next
 
-- More cookbook entries: deterministic test providers, MCP tools.
-- `reference/` — every event Kind, every payload field, the
-  step-package primitives, the cost model, tool lifecycle, replay
-  internals, metrics names, and the SQLite save-file layout.
-- `faq.md`.
+- More cookbook entries: deterministic test providers (using
+  `starlingtest`), MCP tools.

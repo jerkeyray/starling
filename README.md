@@ -67,9 +67,19 @@ and [CHANGELOG.md](CHANGELOG.md).
 - [docs/mental-model.md](docs/mental-model.md) — what a Run is, when
   it terminates, when to use one Run versus many, what replay
   actually checks.
+- [docs/faq.md](docs/faq.md) — quick answers to recurring questions.
+- Cookbook: [branching](docs/cookbook/branching.md),
+  [manual writes](docs/cookbook/manual-writes.md),
+  [multi-turn](docs/cookbook/multi-turn.md).
+- Reference: [events](docs/reference/events.md),
+  [step primitives](docs/reference/step-primitives.md),
+  [cost model](docs/reference/cost-model.md),
+  [tools](docs/reference/tools.md),
+  [replay](docs/reference/replay.md),
+  [metrics](docs/reference/metrics.md),
+  [save file](docs/reference/save-file.md).
 
-More cookbooks and reference pages land progressively;
-[docs/README.md](docs/README.md) tracks the index.
+[docs/README.md](docs/README.md) is the full index.
 
 ## Quickstart
 
