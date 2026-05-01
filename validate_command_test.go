@@ -10,6 +10,7 @@ import (
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 )
 
 // seedSQLiteRun runs a single-turn agent against a fresh on-disk
@@ -22,7 +23,7 @@ func seedSQLiteRun(t *testing.T) (dbPath string, runID string) {
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
 	}
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "hello"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},

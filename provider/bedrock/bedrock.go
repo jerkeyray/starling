@@ -124,7 +124,7 @@ func (p *bedrockProvider) Stream(ctx context.Context, req *provider.Request) (pr
 	}
 	out, err := p.cfg.client.ConverseStream(ctx, input)
 	if err != nil {
-		return nil, err
+		return nil, classifyErr(err)
 	}
 	if out.stream == nil {
 		return nil, errors.New("bedrock: ConverseStream returned nil stream")

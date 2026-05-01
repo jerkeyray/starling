@@ -26,7 +26,7 @@ import (
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
-	"github.com/jerkeyray/starling/internal/merkle"
+	"github.com/jerkeyray/starling/merkle"
 )
 
 func main() {

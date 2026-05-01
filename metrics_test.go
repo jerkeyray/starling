@@ -8,6 +8,7 @@ import (
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/tool"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -23,7 +24,7 @@ func TestMetrics_Run_RecordsTerminalOK(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := starling.NewMetrics(reg)
 
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "hello"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 7, OutputTokens: 3}},
@@ -87,7 +88,7 @@ func TestMetrics_Tool_RecordsOKAndDuration(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := starling.NewMetrics(reg)
 
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
 			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"ping"}`}},
@@ -126,7 +127,7 @@ func TestMetrics_Tool_RecordsOKAndDuration(t *testing.T) {
 // path is a total no-op. Regression guard against someone adding a
 // non-guarded record call that would NPE here.
 func TestMetrics_NilAgent_NoPanic(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "hello"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},

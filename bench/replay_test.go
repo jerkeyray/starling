@@ -5,7 +5,7 @@ import (
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
-	"github.com/jerkeyray/starling/internal/merkle"
+	"github.com/jerkeyray/starling/merkle"
 )
 
 func BenchmarkValidate_1k(b *testing.B) { benchValidate(b, 1_000) }

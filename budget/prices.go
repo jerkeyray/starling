@@ -2,6 +2,7 @@ package budget
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 )
@@ -43,16 +44,37 @@ var prices = map[string]price{
 }
 
 var (
-	warnOnce   sync.Map // map[string]*sync.Once
-	warnWriter = os.Stderr
+	pricesMu   sync.RWMutex
+	warnOnce   sync.Map  // map[string]*sync.Once
+	warnWriter io.Writer = os.Stderr
 )
+
+// RegisterPricing registers or overrides USD pricing for a model. Both
+// inPerMtok and outPerMtok are quoted in dollars per million tokens to
+// match vendor pricing pages.
+//
+// Calling RegisterPricing for a model that previously triggered the
+// "no price entry" warning clears that one-shot memo so the next
+// missing model still surfaces its own warning.
+//
+// Negative or zero rates are accepted; CostUSD will multiply through
+// without complaint. The intended use is custom in-house models or
+// new vendor models not yet shipped in the built-in table.
+func RegisterPricing(model string, inPerMtok, outPerMtok float64) {
+	pricesMu.Lock()
+	prices[model] = price{InPerMtok: inPerMtok, OutPerMtok: outPerMtok}
+	pricesMu.Unlock()
+	warnOnce.Delete(model)
+}
 
 // CostUSD returns the dollar cost of a call of model consuming inTok
 // input and outTok output tokens. The second return reports whether the
 // model was known; unknown models return (0, false) and a one-shot
 // warning is written to stderr.
 func CostUSD(model string, inTok, outTok int64) (float64, bool) {
+	pricesMu.RLock()
 	p, ok := prices[model]
+	pricesMu.RUnlock()
 	if !ok {
 		once, _ := warnOnce.LoadOrStore(model, &sync.Once{})
 		once.(*sync.Once).Do(func() {

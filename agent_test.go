@@ -3,7 +3,6 @@ package starling_test
 import (
 	"context"
 	"errors"
-	"io"
 	"testing"
 	"time"
 
@@ -11,46 +10,9 @@ import (
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/tool"
 )
-
-// ---- canned provider -----------------------------------------------------
-
-// cannedProvider returns a pre-built slice of StreamChunk sequences,
-// one per Stream call. Deterministic and has no network.
-type cannedProvider struct {
-	scripts [][]provider.StreamChunk
-	i       int
-}
-
-func (p *cannedProvider) Info() provider.Info {
-	return provider.Info{ID: "canned", APIVersion: "v0"}
-}
-
-func (p *cannedProvider) Stream(_ context.Context, _ *provider.Request) (provider.EventStream, error) {
-	if p.i >= len(p.scripts) {
-		return nil, errors.New("cannedProvider: exhausted")
-	}
-	s := &cannedStream{chunks: p.scripts[p.i]}
-	p.i++
-	return s, nil
-}
-
-type cannedStream struct {
-	chunks []provider.StreamChunk
-	j      int
-}
-
-func (s *cannedStream) Next(context.Context) (provider.StreamChunk, error) {
-	if s.j >= len(s.chunks) {
-		return provider.StreamChunk{}, io.EOF
-	}
-	c := s.chunks[s.j]
-	s.j++
-	return c, nil
-}
-
-func (s *cannedStream) Close() error { return nil }
 
 // ---- tools ---------------------------------------------------------------
 
@@ -80,7 +42,7 @@ func kindsOf(evs []event.Event) []event.Kind {
 // ---- tests ---------------------------------------------------------------
 
 func TestAgent_TextOnly_OneTurnCompletes(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "hello there"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 5, OutputTokens: 3}},
@@ -123,7 +85,7 @@ func TestAgent_TextOnly_OneTurnCompletes(t *testing.T) {
 
 func TestAgent_ToolRoundTrip(t *testing.T) {
 	// Turn 1: plan a tool call. Turn 2: after tool result, produce final text.
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
 			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"ping"}`}},
@@ -204,7 +166,7 @@ func TestAgent_MerkleRootStable(t *testing.T) {
 	// which are random ULIDs). We can't compare roots across runs
 	// because TurnID is in the TurnStarted payload; we just check that
 	// the root is 32 bytes and non-zero.
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "ok"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
@@ -240,7 +202,7 @@ func TestAgent_MaxTurnsExceeded(t *testing.T) {
 			{Kind: provider.ChunkEnd, StopReason: "tool_use"},
 		}
 	}
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{mkToolUseTurn(), mkToolUseTurn()}}
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{mkToolUseTurn(), mkToolUseTurn()}}
 	log := eventlog.NewInMemory()
 	defer log.Close()
 
@@ -277,7 +239,7 @@ func TestAgent_ValidationErrors(t *testing.T) {
 		t.Fatalf("want error for missing Provider")
 	}
 
-	p := &cannedProvider{}
+	p := &starlingtest.ScriptedProvider{}
 	_, err = (&starling.Agent{Provider: p, Config: starling.Config{Model: "m"}}).Run(context.Background(), "x")
 	if err == nil {
 		t.Fatalf("want error for missing Log")
@@ -299,7 +261,7 @@ func TestAgent_ValidationErrors(t *testing.T) {
 }
 
 func TestAgent_Cancelled(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "hi"},
 			{Kind: provider.ChunkEnd, StopReason: "stop"},
@@ -349,7 +311,7 @@ func TestAgent_ToolRegistryHashStableUnderReorder(t *testing.T) {
 		log := eventlog.NewInMemory()
 		defer log.Close()
 		a := &starling.Agent{
-			Provider: &cannedProvider{scripts: mkScript()},
+			Provider: &starlingtest.ScriptedProvider{Scripts: mkScript()},
 			Tools:    tools,
 			Log:      log,
 			Config:   starling.Config{Model: "m"},
@@ -378,7 +340,7 @@ func TestAgent_ToolRegistryHashStableUnderReorder(t *testing.T) {
 // text. The live run races the two tools; replay dispatches them in
 // recorded completion order and must reproduce the log byte-for-byte.
 func TestAgent_ParallelToolDispatch_ReplayMatches(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
 			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"a"}`}},
@@ -444,7 +406,7 @@ func TestAgent_ParallelToolDispatch_ReplayMatches(t *testing.T) {
 // byte-for-byte.
 func TestAgent_AnthropicThinking_ReplayMatches(t *testing.T) {
 	sig := []byte("sig-bytes-v1")
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			// Two thinking deltas accumulate.
 			{Kind: provider.ChunkReasoning, Text: "let me think "},
@@ -508,7 +470,7 @@ func TestAgent_AnthropicThinking_ReplayMatches(t *testing.T) {
 	}
 
 	// Reset the provider and replay: must be byte-identical.
-	p.i = 0
+	p.Reset()
 	if err := starling.Replay(context.Background(), log, res.RunID, a); err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
@@ -521,7 +483,7 @@ func TestAgent_AnthropicThinking_ReplayMatches(t *testing.T) {
 // resulting log must be byte-identical.
 func TestAgent_Budget_OutputTokens_MidStream(t *testing.T) {
 	usage := provider.UsageUpdate{InputTokens: 5, OutputTokens: 20}
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "partial"},
 			{Kind: provider.ChunkUsage, Usage: &usage},
@@ -640,7 +602,7 @@ func TestAgent_Budget_WallClock(t *testing.T) {
 // ---- namespace -----------------------------------------------------------
 
 func TestAgent_Namespace_PrefixesRunID(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{{
 		{Kind: provider.ChunkText, Text: "ok"},
 		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
 		{Kind: provider.ChunkEnd, StopReason: "stop"},
@@ -672,7 +634,7 @@ func TestAgent_Namespace_PrefixesRunID(t *testing.T) {
 }
 
 func TestAgent_Namespace_RejectsSlash(t *testing.T) {
-	p := &cannedProvider{}
+	p := &starlingtest.ScriptedProvider{}
 	log := eventlog.NewInMemory()
 	defer log.Close()
 	a := &starling.Agent{

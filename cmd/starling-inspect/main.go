@@ -28,9 +28,16 @@ import (
 )
 
 func main() {
+	args := os.Args[1:]
+	for _, a := range args {
+		if a == "-v" || a == "--version" || a == "version" {
+			fmt.Println("starling-inspect", starling.Version)
+			return
+		}
+	}
 	cmd := starling.InspectCommand(nil) // nil factory → view-only
 	cmd.Name = "starling-inspect"
-	if err := cmd.Run(os.Args[1:]); err != nil {
+	if err := cmd.Run(args); err != nil {
 		fmt.Fprintln(os.Stderr, "starling-inspect:", err)
 		os.Exit(1)
 	}

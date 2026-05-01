@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jerkeyray/starling/event"
-	"github.com/jerkeyray/starling/internal/merkle"
+	"github.com/jerkeyray/starling/merkle"
 )
 
 // Validate verifies the integrity of a full run's event slice. Returns

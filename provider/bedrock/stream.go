@@ -75,7 +75,7 @@ func (s *bedrockStream) Next(ctx context.Context) (provider.StreamChunk, error) 
 		case ev, ok := <-s.events:
 			if !ok {
 				if err := s.sdk.Err(); err != nil && !errors.Is(err, io.EOF) {
-					return provider.StreamChunk{}, err
+					return provider.StreamChunk{}, classifyErr(err)
 				}
 				s.flushTerminal()
 				continue

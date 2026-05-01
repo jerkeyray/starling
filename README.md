@@ -53,8 +53,12 @@ see exactly where today's behavior diverges from the original recording.
 ## Install
 
 ```bash
-go get github.com/jerkeyray/starling
+go get github.com/jerkeyray/starling@v0.1.0-beta.1
 ```
+
+Pin a tag rather than tracking `main` — Starling is in beta and breaking
+changes are permitted between beta cuts. See [Release policy](#release-policy)
+and [CHANGELOG.md](CHANGELOG.md).
 
 ## Quickstart
 
@@ -280,6 +284,46 @@ make vuln      # govulncheck
 make inspect   # run the inspector locally
 make smoke     # quick end-to-end smoke run
 ```
+
+## Release policy
+
+Starling is in beta. Versions are tagged `v0.x.y-beta.N` and
+distributed through Go module proxy.
+
+- **Pin a tag.** Don't track `main`; the working branch may carry
+  breaking changes between beta cuts.
+- **Breaking changes are permitted between beta tags.** Each tag's
+  delta is recorded in [CHANGELOG.md](CHANGELOG.md). Until GA there
+  is no API or wire-format compatibility promise.
+- **Within a tag, breakage is a bug.** A pinned beta is reproducible.
+- **Schema versioning** for the event log is documented under
+  [Event log schema](#event-log-schema) below — this is the one
+  surface that has its own forward/back-compat contract.
+- **GA (`v1.0.0`)** will land when the public API surface, event
+  schema, and replay contract are stable enough to commit to. No
+  date promised.
+
+## Event log schema
+
+`event.SchemaVersion` is the format version of the events written
+into the log. Resume and replay both read this field and refuse runs
+written by an unknown schema (`ErrSchemaVersionMismatch`).
+
+- **When the constant bumps.** Whenever the wire-format of an event
+  payload, the set of `event.Kind` values, or the canonical-encoding
+  rules change in a way that affects the BLAKE3 hash chain.
+- **What consumers must do.** Re-pin to the matching beta tag, then
+  run `starling migrate <db>` (also exposed in-process as
+  `starling.MigrateCommand`) to bring on-disk logs forward. The
+  `starling schema-version <db>` command prints the current version.
+- **Compatibility within a major-schema family.** Minor bumps must
+  remain resume-compatible: an older agent binary should be able to
+  resume a run written by a newer one whenever the new schema is a
+  superset. Breaking format changes bump the major part and require
+  the explicit `migrate` step.
+- **Migrations live in `migrate_command.go`.** Each new on-disk
+  format ships its forward migration alongside the schema bump in
+  the same beta.
 
 ## License
 

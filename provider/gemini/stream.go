@@ -81,7 +81,7 @@ func (s *geminiStream) Next(ctx context.Context) (provider.StreamChunk, error) {
 				s.sdkDone = true
 				continue
 			}
-			return provider.StreamChunk{}, err
+			return provider.StreamChunk{}, classifyErr(err)
 		}
 		s.handleResponse(resp)
 	}

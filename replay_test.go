@@ -8,12 +8,13 @@ import (
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/tool"
 )
 
 func TestReplay_TextOnlyRoundTrip(t *testing.T) {
 	// Live run with a canned provider emitting a one-turn completion.
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "hello there"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 5, OutputTokens: 3}},
@@ -41,7 +42,7 @@ func TestReplay_TextOnlyRoundTrip(t *testing.T) {
 
 func TestReplay_ToolRoundTrip(t *testing.T) {
 	// Two-turn run: turn 1 plans a tool call, turn 2 produces final text.
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
 			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"ping"}`}},
@@ -76,7 +77,7 @@ func TestReplay_ToolRoundTrip(t *testing.T) {
 
 func TestReplay_DivergentToolReturnsErrNonDeterminism(t *testing.T) {
 	// Live run captures echo("ping") -> "ping".
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
 			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"ping"}`}},
@@ -124,7 +125,7 @@ func TestReplay_UnknownRunReturnsError(t *testing.T) {
 	log := eventlog.NewInMemory()
 	defer log.Close()
 	a := &starling.Agent{
-		Provider: &cannedProvider{},
+		Provider: &starlingtest.ScriptedProvider{},
 		Log:      log,
 		Config:   starling.Config{Model: "x"},
 	}

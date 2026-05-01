@@ -9,6 +9,7 @@ import (
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/tool"
 )
 
@@ -43,7 +44,7 @@ func stepKinds(evs []starling.StepEvent) []event.Kind {
 }
 
 func TestStream_HappyPath(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "hello"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 4, OutputTokens: 2}},
@@ -100,7 +101,7 @@ func TestStream_HappyPath(t *testing.T) {
 }
 
 func TestStream_Tools(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
 			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"ping"}`}},
@@ -195,7 +196,7 @@ func TestStream_ClosesOnCtxCancel(t *testing.T) {
 func TestStream_ClosesOnRunFailed(t *testing.T) {
 	// Empty scripts ⇒ cannedProvider.Stream returns "exhausted" error
 	// on the first call, which surfaces as a ProviderError → RunFailed.
-	p := &cannedProvider{}
+	p := &starlingtest.ScriptedProvider{}
 	log := eventlog.NewInMemory()
 	defer log.Close()
 
@@ -240,7 +241,7 @@ func TestStream_ReturnsSetupError(t *testing.T) {
 }
 
 func TestStream_RunIDMatches(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "hi"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},

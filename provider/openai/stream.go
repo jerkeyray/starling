@@ -75,7 +75,7 @@ func (s *openaiStream) Next(ctx context.Context) (provider.StreamChunk, error) {
 
 		if !s.sdk.Next() {
 			if err := s.sdk.Err(); err != nil && !errors.Is(err, io.EOF) {
-				return provider.StreamChunk{}, err
+				return provider.StreamChunk{}, classifyErr(err)
 			}
 			s.sdkDone = true
 			continue

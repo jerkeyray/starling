@@ -11,6 +11,7 @@ import (
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/tool"
 )
 
@@ -68,7 +69,7 @@ func TestAgent_Shutdown_CancelMidStream(t *testing.T) {
 // The tool's ctx inherits the run ctx, so its blocking work must
 // unblock and the run must terminate as RunCancelled.
 func TestAgent_Shutdown_CancelMidTool(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{{
 		{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "sleep"}},
 		{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{}`}},
 		{Kind: provider.ChunkToolUseEnd, ToolUse: &provider.ToolUseChunk{CallID: "c1"}},
@@ -139,7 +140,7 @@ func TestAgent_Shutdown_TerminalLogAppendErrorSurfaces(t *testing.T) {
 	defer base.Close()
 	log := &failingLog{inner: base, failAfter: 2}
 
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{{
 		{Kind: provider.ChunkText, Text: "hi"},
 		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
 		{Kind: provider.ChunkEnd, StopReason: "stop"},

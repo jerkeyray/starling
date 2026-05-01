@@ -1,6 +1,8 @@
 package budget
 
 import (
+	"bytes"
+	"io"
 	"math"
 	"testing"
 )
@@ -48,6 +50,66 @@ func TestCostUSD_Unknown(t *testing.T) {
 	}
 	if got != 0 {
 		t.Fatalf("CostUSD = %v, want 0", got)
+	}
+}
+
+func TestRegisterPricing_LooksUp(t *testing.T) {
+	const model = "custom/test-model-A"
+	RegisterPricing(model, 4.0, 12.0)
+	t.Cleanup(func() {
+		pricesMu.Lock()
+		delete(prices, model)
+		pricesMu.Unlock()
+	})
+
+	got, ok := CostUSD(model, 1_000_000, 1_000_000)
+	if !ok {
+		t.Fatalf("ok = false after RegisterPricing")
+	}
+	if math.Abs(got-16.0) > 1e-9 {
+		t.Fatalf("CostUSD = %v, want 16.0", got)
+	}
+}
+
+func TestRegisterPricing_OverridesAndClearsWarnOnce(t *testing.T) {
+	const model = "custom/test-model-B"
+
+	var buf bytes.Buffer
+	prevWriter := warnWriter
+	warnWriter = io.Writer(&buf)
+	t.Cleanup(func() {
+		warnWriter = prevWriter
+		pricesMu.Lock()
+		delete(prices, model)
+		pricesMu.Unlock()
+		warnOnce.Delete(model)
+	})
+
+	if _, ok := CostUSD(model, 1, 1); ok {
+		t.Fatal("first lookup: ok=true, want false")
+	}
+	if buf.Len() == 0 {
+		t.Fatal("expected one stderr warning on first miss")
+	}
+
+	RegisterPricing(model, 1.0, 1.0)
+
+	if _, ok := CostUSD(model, 1, 1); !ok {
+		t.Fatal("after RegisterPricing: ok=false")
+	}
+
+	// Drop the override; the next miss must re-arm the one-shot warning.
+	pricesMu.Lock()
+	delete(prices, model)
+	pricesMu.Unlock()
+	warnOnce.Delete(model)
+
+	buf.Reset()
+	if _, ok := CostUSD(model, 1, 1); ok {
+		t.Fatal("post-delete: ok=true")
+	}
+	if buf.Len() == 0 {
+		t.Fatal("expected re-armed warning after RegisterPricing cleared the memo")
 	}
 }
 

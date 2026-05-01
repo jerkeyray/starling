@@ -34,6 +34,9 @@ func main() {
 	cmd := os.Args[1]
 	args := os.Args[2:]
 	switch cmd {
+	case "-v", "--version", "version":
+		fmt.Println("starling", starling.Version)
+		return
 	case "validate":
 		err = starling.ValidateCommand().Run(args)
 	case "export":
@@ -72,6 +75,7 @@ func usage(w *os.File) {
 	fmt.Fprintln(w, "  replay     Headless replay of one run. Requires a dual-mode binary.")
 	fmt.Fprintln(w, "  migrate    Apply pending schema migrations to a SQLite event log.")
 	fmt.Fprintln(w, "  schema-version  Print the schema version of a SQLite event log.")
+	fmt.Fprintln(w, "  version         Print this binary's Starling version.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Run 'starling <command> -h' for per-command flags.")
 }

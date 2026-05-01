@@ -14,6 +14,7 @@ import (
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -29,7 +30,7 @@ func TestAgent_Logger_LifecycleAttrs(t *testing.T) {
 	h := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	logger := slog.New(h)
 
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{{
 		{Kind: provider.ChunkText, Text: "hi"},
 		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
 		{Kind: provider.ChunkEnd, StopReason: "stop"},
@@ -133,7 +134,7 @@ func TestAgent_Logger_NilIsSilent(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer slog.SetDefault(prevDefault)
 
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{{
 		{Kind: provider.ChunkText, Text: "hi"},
 		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
 		{Kind: provider.ChunkEnd, StopReason: "stop"},
@@ -183,7 +184,7 @@ func TestAgent_OTel_SpanTree(t *testing.T) {
 	otel.SetTracerProvider(tp)
 	defer otel.SetTracerProvider(prev)
 
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{{
 		{Kind: provider.ChunkText, Text: "hi"},
 		{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
 		{Kind: provider.ChunkEnd, StopReason: "stop"},

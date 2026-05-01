@@ -13,6 +13,7 @@ import (
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/tool"
 )
 
@@ -27,7 +28,7 @@ func TestResume_UnknownRunID(t *testing.T) {
 	defer log.Close()
 
 	a := &starling.Agent{
-		Provider: &cannedProvider{},
+		Provider: &starlingtest.ScriptedProvider{},
 		Log:      log,
 		Config:   starling.Config{Model: "gpt-4o-mini"},
 	}
@@ -38,7 +39,7 @@ func TestResume_UnknownRunID(t *testing.T) {
 }
 
 func TestResume_AlreadyTerminal(t *testing.T) {
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "done"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 1, OutputTokens: 1}},
@@ -91,7 +92,7 @@ func recordThenCrash(t *testing.T, cfg starling.Config, tools []tool.Tool, goal 
 	src := eventlog.NewInMemory()
 	t.Cleanup(func() { src.Close() })
 	a := &starling.Agent{
-		Provider: &cannedProvider{scripts: scripts},
+		Provider: &starlingtest.ScriptedProvider{Scripts: scripts},
 		Tools:    tools,
 		Log:      src,
 		Config:   cfg,
@@ -127,7 +128,7 @@ func TestResume_AfterAssistantMessage(t *testing.T) {
 	log, runID := recordThenCrash(t, cfg, []tool.Tool{echoTool()}, "do it", scripts, 5)
 
 	// Resume with a fresh script that finalizes.
-	resumeProvider := &cannedProvider{scripts: [][]provider.StreamChunk{
+	resumeProvider := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "all done"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 2, OutputTokens: 2}},
@@ -182,7 +183,7 @@ func TestResume_WithExtraMessage(t *testing.T) {
 	cfg := starling.Config{Model: "gpt-4o-mini", MaxTurns: 4}
 	log, runID := recordThenCrash(t, cfg, []tool.Tool{echoTool()}, "do it", scripts, 5)
 
-	resumeProvider := &cannedProvider{scripts: [][]provider.StreamChunk{
+	resumeProvider := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "acknowledged"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 3, OutputTokens: 2}},
@@ -246,7 +247,7 @@ func TestResume_PendingToolCallReissue(t *testing.T) {
 	cfg := starling.Config{Model: "gpt-4o-mini", MaxTurns: 4}
 	log, runID := recordThenCrash(t, cfg, []tool.Tool{echoTool()}, "do it", scripts, 4)
 
-	resumeProvider := &cannedProvider{scripts: [][]provider.StreamChunk{
+	resumeProvider := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkText, Text: "fine"},
 			{Kind: provider.ChunkUsage, Usage: &provider.UsageUpdate{InputTokens: 2, OutputTokens: 1}},
@@ -348,7 +349,7 @@ func TestResume_PendingToolCallRefuse(t *testing.T) {
 	log, runID := recordThenCrash(t, cfg, []tool.Tool{echoTool()}, "do it", scripts, 4)
 
 	a := &starling.Agent{
-		Provider: &cannedProvider{},
+		Provider: &starlingtest.ScriptedProvider{},
 		Tools:    []tool.Tool{echoTool()},
 		Log:      log,
 		Config:   cfg,
@@ -384,7 +385,7 @@ func (p *capturingProvider) Stream(_ context.Context, req *provider.Request) (pr
 	if p.i >= len(p.scripts) {
 		return nil, io.EOF
 	}
-	s := &cannedStream{chunks: p.scripts[p.i]}
+	s := starlingtest.NewStream(p.scripts[p.i])
 	p.i++
 	return s, nil
 }
@@ -457,7 +458,7 @@ func TestResume_NamespaceMismatch(t *testing.T) {
 	log := eventlog.NewInMemory()
 	defer log.Close()
 	a := &starling.Agent{
-		Provider:  &cannedProvider{},
+		Provider:  &starlingtest.ScriptedProvider{},
 		Log:       log,
 		Config:    starling.Config{Model: "gpt-4o-mini"},
 		Namespace: "foo",
@@ -492,7 +493,7 @@ func TestResume_SchemaMismatch(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	a := &starling.Agent{
-		Provider: &cannedProvider{},
+		Provider: &starlingtest.ScriptedProvider{},
 		Log:      log,
 		Config:   starling.Config{Model: "gpt-4o-mini"},
 	}

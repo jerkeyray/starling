@@ -11,6 +11,7 @@ import (
 	starling "github.com/jerkeyray/starling"
 	"github.com/jerkeyray/starling/eventlog"
 	"github.com/jerkeyray/starling/provider"
+	"github.com/jerkeyray/starling/starlingtest"
 	"github.com/jerkeyray/starling/replay"
 	"github.com/jerkeyray/starling/tool"
 )
@@ -36,7 +37,7 @@ func TestReplayCmd_OK(t *testing.T) {
 		return &starling.Agent{
 			// Provider is replaced by Replay; any non-nil value
 			// satisfies validate().
-			Provider: &cannedProvider{},
+			Provider: &starlingtest.ScriptedProvider{},
 			Tools:    tools,
 			Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
 		}, nil
@@ -62,7 +63,7 @@ func TestReplayCmd_Diverged(t *testing.T) {
 	})
 	factory := func(ctx context.Context) (replay.Agent, error) {
 		return &starling.Agent{
-			Provider: &cannedProvider{},
+			Provider: &starlingtest.ScriptedProvider{},
 			Tools:    []tool.Tool{driftTool},
 			Config:   starling.Config{Model: "gpt-4o-mini", MaxTurns: 4},
 		}, nil
@@ -103,7 +104,7 @@ func seedSQLiteToolRun(t *testing.T) (string, string, []tool.Tool) {
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
 	}
-	p := &cannedProvider{scripts: [][]provider.StreamChunk{
+	p := &starlingtest.ScriptedProvider{Scripts: [][]provider.StreamChunk{
 		{
 			{Kind: provider.ChunkToolUseStart, ToolUse: &provider.ToolUseChunk{CallID: "c1", Name: "echo"}},
 			{Kind: provider.ChunkToolUseDelta, ToolUse: &provider.ToolUseChunk{CallID: "c1", ArgsDelta: `{"msg":"ping"}`}},

@@ -21,7 +21,7 @@ import (
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
-	"github.com/jerkeyray/starling/internal/merkle"
+	"github.com/jerkeyray/starling/merkle"
 )
 
 // sealChain appends a RunCompleted terminal with a correct MerkleRoot
