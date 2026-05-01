@@ -14,8 +14,8 @@ chain therefore lays out byte-identically across live + replay.
 > **Where you can call them.** All three require a `step.Context`
 > attached to `ctx`. Inside `Agent.Run`, `Resume`, and tool
 > implementations executed by the agent, the context is already
-> wired. Outside that — bare HTTP handlers, init code, helper
-> goroutines — calling these panics. The cookbook's [manual-writes
+> wired. Outside that - bare HTTP handlers, init code, helper
+> goroutines - calling these panics. The cookbook's [manual-writes
 > entry](../cookbook/manual-writes.md) covers writing events
 > without `Agent.Run`.
 
@@ -38,7 +38,7 @@ deadline := step.Now(ctx).Add(30 * time.Second)
 A run that calls `time.Now()` directly instead of `step.Now(ctx)`
 will diverge during replay because the wall-clock value won't match
 the recording. Provider-emitted timestamps inside model responses
-are not affected — they ride through `event.Event.Timestamp` set by
+are not affected - they ride through `event.Event.Timestamp` set by
 the event log itself.
 
 ## `step.Random(ctx) uint64`
@@ -55,7 +55,7 @@ attemptID := step.Random(ctx) % 1000
 - **Replay mode**: pops the next `SideEffectRecorded`,
   decodes uint64, re-emits, returns.
 
-The reserved names `"now"` and `"rand"` are taken — user
+The reserved names `"now"` and `"rand"` are taken - user
 `SideEffect` calls must not use them.
 
 ## `step.SideEffect[T](ctx, name, fn) (T, error)`
@@ -87,7 +87,7 @@ Constraints:
   unique within a run (an LLM tool wraps each tool call with its
   own internal name automatically; `SideEffect` is for direct use
   in agent code).
-- If `fn` returns an error, the result is **not** recorded —
+- If `fn` returns an error, the result is **not** recorded -
   replay will re-execute `fn` to reproduce the error path.
 
 ## When to use each
@@ -100,7 +100,7 @@ Constraints:
 | Tool with idempotency, retries, schema | `tool.Tool` (the runtime wraps it) |
 
 If your tool is already a `tool.Tool` and runs through the agent
-loop, you don't need `step.SideEffect` on top — `step.CallTool`
+loop, you don't need `step.SideEffect` on top - `step.CallTool`
 already records `ToolCallScheduled`/`ToolCallCompleted` for you.
 
 ## Failure modes
@@ -109,7 +109,7 @@ All three panic on:
 
 - Calling without a `step.Context` on `ctx` (programmer error;
   the agent loop always provides one).
-- The event log rejecting the `SideEffectRecorded` write — once
+- The event log rejecting the `SideEffectRecorded` write - once
   this happens the run's hash chain is incomplete and any further
   work would produce a non-replayable trace, so the runtime fails
   loudly rather than silently corrupt.
@@ -119,8 +119,8 @@ All three panic on:
 
 ## See also
 
-- [reference/events.md](events.md) — `SideEffectRecorded` payload.
-- [reference/replay.md](replay.md) — how recorded side effects are
+- [reference/events.md](events.md) - `SideEffectRecorded` payload.
+- [reference/replay.md](replay.md) - how recorded side effects are
   consumed during replay.
 - [`step/config.go`](../../step/config.go) for `ClockFn` and the
   other live-mode knobs.

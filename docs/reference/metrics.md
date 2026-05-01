@@ -36,8 +36,8 @@ disabled state.
 
 | Name | Type | Labels | Notes |
 | --- | --- | --- | --- |
-| `starling_runs_started_total` | counter | — | One bump per `Agent.Run` entry. |
-| `starling_runs_in_flight` | gauge | — | Increments at run entry, decrements at exit. |
+| `starling_runs_started_total` | counter | - | One bump per `Agent.Run` entry. |
+| `starling_runs_in_flight` | gauge | - | Increments at run entry, decrements at exit. |
 | `starling_run_terminal_total` | counter | `status`, `error_type` | `status` ∈ {`ok`, `error`, `cancelled`, `budget`}; `error_type` is `none` on `ok`/`cancelled`, else the `RunFailed.ErrorType` value. |
 | `starling_run_duration_seconds` | histogram | `status` | 12 exponential buckets, 5 ms → 120 s. |
 | `starling_provider_calls_total` | counter | `model`, `status` | One per `Provider.Stream()` open; `status` ∈ {`ok`, `error`, `cancelled`}. |
@@ -46,7 +46,7 @@ disabled state.
 | `starling_tool_calls_total` | counter | `tool`, `status`, `error_type` | One per attempt; `error_type` ∈ {`tool`, `panic`, `cancelled`, `other`} on error, `none` on ok. |
 | `starling_tool_call_duration_seconds` | histogram | `tool` | Per attempt. |
 | `starling_eventlog_appends_total` | counter | `kind`, `status` | `kind` is `event.Kind.String()`. |
-| `starling_eventlog_append_duration_seconds` | histogram | `kind` | Tighter buckets (50 µs → 100 ms) — disk-trouble tail spikes are visible here. |
+| `starling_eventlog_append_duration_seconds` | histogram | `kind` | Tighter buckets (50 µs → 100 ms) - disk-trouble tail spikes are visible here. |
 | `starling_budget_exceeded_total` | counter | `axis` | `axis` ∈ {`input_tokens`, `output_tokens`, `cost_usd`, `wall_clock`}. |
 
 All metrics use seconds for time and align with Prometheus
@@ -104,9 +104,9 @@ shape end-to-end.
 
 ## See also
 
-- [`metrics.go`](../../metrics.go) — the source of truth for
+- [`metrics.go`](../../metrics.go) - the source of truth for
   Prometheus names and helper methods.
-- [`internal/obs/trace.go`](../../internal/obs/trace.go) — the
+- [`internal/obs/trace.go`](../../internal/obs/trace.go) - the
   source of truth for span names and attribute keys.
-- [`examples/incident_triage`](../../examples/incident_triage) —
+- [`examples/incident_triage`](../../examples/incident_triage) -
   full Prometheus + OTel wiring.

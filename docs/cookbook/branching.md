@@ -12,14 +12,14 @@ Two common cases:
   3 had returned a different tool result?" Fork at the boundary, fix
   the recorded payload (or change tool wiring), then `Resume` from the
   same chain.
-- **Audit-safe experimentation.** The original log stays intact —
+- **Audit-safe experimentation.** The original log stays intact -
   it's the canonical recording. Branches are throwaway.
 
 ## The WAL footgun
 
 SQLite in WAL mode writes recently-committed data to `runs.db-wal`
 and `runs.db-shm` *before* checkpoint. A naïve `cp runs.db
-branch.db` misses any in-WAL writes — the destination is corrupt.
+branch.db` misses any in-WAL writes - the destination is corrupt.
 
 `eventlog.ForkSQLite` uses [`VACUUM INTO`][vacuum-into] under the
 hood, which is the only SQLite-supported safe-clone. It serializes
@@ -45,8 +45,8 @@ err := eventlog.ForkSQLite(ctx, "runs.db", "branch.db", runID, 3)
 
 Errors:
 
-- `ErrForkNotFound` — the source log has no events for `runID`.
-- "dstPath already exists" — `VACUUM INTO` refuses to overwrite. The
+- `ErrForkNotFound` - the source log has no events for `runID`.
+- "dstPath already exists" - `VACUUM INTO` refuses to overwrite. The
   function checks up-front and returns a clear message.
 - On any mid-operation failure the partial destination file plus its
   sidecars are removed before returning.
@@ -85,6 +85,6 @@ event commits to *this* branch's leaves, distinct from the original.
 
 ## See also
 
-- [Mental model — Resume vs new Run](../mental-model.md#resume-vs-new-run)
+- [Mental model - Resume vs new Run](../mental-model.md#resume-vs-new-run)
   for when forking is the right call versus starting fresh.
 - [`eventlog/fork.go`](../../eventlog/fork.go) for the implementation.

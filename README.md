@@ -2,7 +2,7 @@
   <picture>
     <source srcset="docs/brand/logo-dark.svg" media="(prefers-color-scheme: dark)">
     <source srcset="docs/brand/logo-light.svg" media="(prefers-color-scheme: light)">
-    <img src="docs/brand/logo-dark.svg" alt="starling" width="320" />
+    <img src="docs/brand/logo-dark.svg" alt="starling" width="220" />
   </picture>
 </p>
 
@@ -23,23 +23,32 @@
 
 ---
 
-Starling is a Go runtime for building LLM agents where every run is recorded as
-an append-only, BLAKE3-chained, Merkle-rooted event log. When an agent fails in
-production, you can inspect the log, replay it against the same agent wiring, and
-see exactly where today's behavior diverges from the original recording.
+## Every run is an event log.
 
-## Why Starling?
+That's the whole pitch. Starling treats the agent loop as a stream of
+typed, append-only events - every prompt, model chunk, tool call,
+budget decision, and terminal state - committed to a BLAKE3 hash chain
+with a Merkle root over the whole run. The log is the source of truth;
+`RunResult` is just a convenience derived from it.
 
-| If you need... | Starling gives you... |
-| --- | --- |
-| Debuggable agent runs | A complete event stream for prompts, tool calls, provider chunks, usage, budgets, and errors. |
-| Portable replay | Deterministic re-execution from the recorded log, including MCP tool side effects. |
-| Audit evidence | Hash-chained events and Merkle roots suitable for retention, review, and incident timelines. |
-| Cost control | Token, USD, and wall-clock budgets enforced inside the runtime, not just observed after the fact. |
-| Provider choice | OpenAI-compatible, Anthropic, Gemini, Amazon Bedrock, OpenRouter, and local/open model backends. |
-| Operational visibility | Metrics hooks, structured divergence logs, and an embedded inspector UI. |
+That single decision is what gives you everything else:
 
-## Features
+- **Replay** is reading the log back through the same agent wiring and
+  byte-comparing each re-emitted event. Divergence is a structured
+  error pointing at the first event that didn't reproduce.
+- **Resume** is appending to a chain that didn't reach a terminal
+  event. The hash chain enforces "nothing was lost in the gap."
+- **Audit** is the Merkle root on the terminal event committing to
+  every leaf - tampering with any earlier event invalidates the
+  commitment.
+- **Cost control, observability, the inspector, replay tests** -
+  all of them are projections of the same event stream.
+
+If you've worked with event sourcing before, this should sound
+familiar. If you've shipped LLM agents before, you know what it costs
+to *not* have this.
+
+## What's included
 
 - **Event-sourced execution**: every meaningful runtime action is an event.
 - **Deterministic replay**: recorded runs can be replayed without calling the
@@ -66,18 +75,18 @@ see exactly where today's behavior diverges from the original recording.
 go get github.com/jerkeyray/starling@v0.1.0-beta.1
 ```
 
-Pin a tag rather than tracking `main` — Starling is in beta and breaking
+Pin a tag rather than tracking `main` - Starling is in beta and breaking
 changes are permitted between beta cuts. See [Release policy](#release-policy)
 and [CHANGELOG.md](CHANGELOG.md).
 
 ## Documentation
 
-- [docs/getting-started.md](docs/getting-started.md) — install, your
+- [docs/getting-started.md](docs/getting-started.md) - install, your
   first agent, tools, durable storage, replay.
-- [docs/mental-model.md](docs/mental-model.md) — what a Run is, when
+- [docs/mental-model.md](docs/mental-model.md) - what a Run is, when
   it terminates, when to use one Run versus many, what replay
   actually checks.
-- [docs/faq.md](docs/faq.md) — quick answers to recurring questions.
+- [docs/faq.md](docs/faq.md) - quick answers to recurring questions.
 - Cookbook: [branching](docs/cookbook/branching.md),
   [manual writes](docs/cookbook/manual-writes.md),
   [multi-turn](docs/cookbook/multi-turn.md).
@@ -285,7 +294,7 @@ Loopback web UI: runs list with per-row totals, per-event timeline
 with a syntax-highlighted JSON detail pane, and a `/diff` page
 aligning any two runs side-by-side by sequence number. Dark by
 default, theme toggle in the topbar, hashes and run ids are
-click-to-copy, no CDN or JS build step. Runs read-only — `Append`
+click-to-copy, no CDN or JS build step. Runs read-only - `Append`
 is impossible on the inspector's DB handle.
 
 ![Inspector run detail with timeline and JSON pane](docs/inspector/run.webp)
@@ -366,7 +375,7 @@ distributed through Go module proxy.
   is no API or wire-format compatibility promise.
 - **Within a tag, breakage is a bug.** A pinned beta is reproducible.
 - **Schema versioning** for the event log is documented under
-  [Event log schema](#event-log-schema) below — this is the one
+  [Event log schema](#event-log-schema) below - this is the one
   surface that has its own forward/back-compat contract.
 - **GA (`v1.0.0`)** will land when the public API surface, event
   schema, and replay contract are stable enough to commit to. No

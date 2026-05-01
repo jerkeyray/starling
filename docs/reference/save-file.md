@@ -45,20 +45,20 @@ CREATE TABLE eventlog_events (
 
 Field-by-field:
 
-- `run_id` — the agent's `RunID`. May be `Namespace + "/" + ULID`
+- `run_id` - the agent's `RunID`. May be `Namespace + "/" + ULID`
   if `Config.Namespace` is set.
-- `seq` — 1-based monotonic per-run counter. Combined with `run_id`
+- `seq` - 1-based monotonic per-run counter. Combined with `run_id`
   forms the primary key; this index covers every read pattern the
   runtime uses (read-by-run, list-runs, stream-tail).
-- `prev_hash` — BLAKE3-32 of the canonical CBOR encoding of the
+- `prev_hash` - BLAKE3-32 of the canonical CBOR encoding of the
   prior event. NULL on the first event of a run; required on
   every subsequent event.
-- `ts` — wall-clock timestamp at append time, in nanoseconds since
+- `ts` - wall-clock timestamp at append time, in nanoseconds since
   Unix epoch. Replay reuses recorded timestamps so chain hashes
   align.
-- `kind` — `event.Kind` value (uint8). Stored as INTEGER for SQLite
+- `kind` - `event.Kind` value (uint8). Stored as INTEGER for SQLite
   ergonomics.
-- `payload` — canonical CBOR bytes of the per-kind payload struct.
+- `payload` - canonical CBOR bytes of the per-kind payload struct.
   Encoded via `cborenc.Marshal` (RFC 8949 §4.2 deterministic).
 
 ### `eventlog_schema_migrations`
@@ -88,9 +88,9 @@ skip the migration step):
 | `synchronous` | `NORMAL` | Trades a tiny crash-window for ~3× write throughput. |
 | `foreign_keys` | `ON` | Belt-and-braces; current schema has no FKs but future migrations may. |
 | `busy_timeout` (DSN) | 5000 ms | Per-connection; wait up to 5 s on lock contention before erroring. |
-| `_txlock` (DSN) | `immediate` | `BeginTx` grabs the write lock upfront — closes the read-then-insert window. |
+| `_txlock` (DSN) | `immediate` | `BeginTx` grabs the write lock upfront - closes the read-then-insert window. |
 
-Read-only opens use `mode=ro` in the DSN. **Not** `immutable=1` —
+Read-only opens use `mode=ro` in the DSN. **Not** `immutable=1` -
 the inspector is expected to be safe to point at a database that
 another Starling process is actively writing to, and `immutable=1`
 would let SQLite skip change-counter checks and serve stale reads.
@@ -99,7 +99,7 @@ would let SQLite skip change-counter checks and serve stale reads.
 
 Every `payload` blob is the canonical CBOR encoding of one of the
 typed payload structs in
-[`event/types.go`](../../event/types.go) — see
+[`event/types.go`](../../event/types.go) - see
 [reference/events.md](events.md) for the per-kind field tables.
 
 The encoding is deterministic per RFC 8949 §4.2:
@@ -154,15 +154,15 @@ piping into `jq`.
 `eventlog.NewPostgres` uses the same logical schema with
 PostgreSQL-flavored types (`BYTEA`, `BIGINT`, primary key on
 `(run_id, seq)`) and the same migrations table. The big difference
-is no WAL sidecar files — `pg_dump`/`pg_basebackup` are the
+is no WAL sidecar files - `pg_dump`/`pg_basebackup` are the
 canonical safe-copy tools, and a counterpart to
 `eventlog.ForkSQLite` for Postgres is on the roadmap.
 
 ## See also
 
-- [reference/events.md](events.md) — the typed payloads stored
+- [reference/events.md](events.md) - the typed payloads stored
   in the `payload` column.
-- [cookbook/branching.md](../cookbook/branching.md) — WAL-safe
+- [cookbook/branching.md](../cookbook/branching.md) - WAL-safe
   forking via `eventlog.ForkSQLite`.
-- [`eventlog/sqlite.go`](../../eventlog/sqlite.go) — schema,
+- [`eventlog/sqlite.go`](../../eventlog/sqlite.go) - schema,
   migrations, query plan.

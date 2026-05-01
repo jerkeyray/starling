@@ -40,7 +40,7 @@ across `event.SchemaVersion` bumps.
 
 ## How do I do session-level budgets?
 
-You don't, directly — there's no `Session` primitive yet. The
+You don't, directly - there's no `Session` primitive yet. The
 recommended pattern: one Run per logical message, an external ID
 column on your side that groups them, and a budget cap *per Run*
 plus a process-level accumulator if you really need a hard ceiling
@@ -48,7 +48,7 @@ across the group.
 
 A first-class `Session` (N Runs sharing a Budget) was triaged but
 deferred from the current beta. If you hit this in practice, file
-an issue describing the workflow — the design space is wide and
+an issue describing the workflow - the design space is wide and
 real usage is the best constraint.
 
 ## What does prompt caching actually do?
@@ -63,7 +63,7 @@ Starling surfaces the cache token counts on
 `AssistantMessageCompleted` (`CacheReadTokens` /
 `CacheCreateTokens`) and aggregates them into
 `RunResult.CacheStats`. The cost stamped on the event already
-reflects the multipliers — you don't compute them yourself.
+reflects the multipliers - you don't compute them yourself.
 
 OpenAI's automatic prompt caching is reflected in their billing
 but not separately reported to the SDK; Starling can't surface it.
@@ -95,7 +95,7 @@ re-emitted `RunStarted` against the recording, so any drift in
 config shows up as a `payload` divergence at `seq=1`.
 
 `starling.WithForceProvider()` skips the upfront identity check
-but does **not** skip the byte comparison — see the previous
+but does **not** skip the byte comparison - see the previous
 question.
 
 ## Why does my tool's replay diverge mid-run?
@@ -168,5 +168,5 @@ shape.
 Open an issue at
 <https://github.com/jerkeyray/starling/issues>. The triage doc
 ([temp_notes/REVIEWER_FEEDBACK_PLAN.md](../temp_notes/REVIEWER_FEEDBACK_PLAN.md))
-lists items deferred from the current beta — feel free to upvote
+lists items deferred from the current beta - feel free to upvote
 or expand on any.

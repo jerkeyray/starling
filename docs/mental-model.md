@@ -11,7 +11,7 @@ A Run is one invocation of `Agent.Run(ctx, goal)`. It owns:
 
 - a unique ULID-style **RunID** (or `Namespace + "/" + ULID` if
   `Config.Namespace` is set)
-- an **append-only event log** entry per meaningful action — every
+- an **append-only event log** entry per meaningful action - every
   prompt, every tool call, every usage update, every budget decision
 - a single **terminal event** that closes the chain: `RunCompleted`,
   `RunFailed`, or `RunCancelled`
@@ -45,7 +45,7 @@ or `Config.MaxTurns` is reached
 
 ### Tools inside a Turn
 
-Tool calls don't get their own Turn — they're *inside* the assistant's
+Tool calls don't get their own Turn - they're *inside* the assistant's
 turn. The model emits `ToolCallScheduled`, the runtime executes the
 tool, emits `ToolCallCompleted` (or `ToolCallFailed` if the tool
 returned an error), and the loop kicks off a new `TurnStarted` for
@@ -54,7 +54,7 @@ the model to react to the result.
 Retries and panics are part of the same call's events: a tool that
 returns `tool.ErrTransient` produces multiple `ToolCallScheduled`
 events with incrementing `Attempt` until it succeeds or the cap is
-hit. Replay replays exactly the same retry sequence — that's what
+hit. Replay replays exactly the same retry sequence - that's what
 "deterministic replay" means at the tool layer.
 
 ## When to use one Run vs many
@@ -99,7 +99,7 @@ Use Resume when:
 
 Use a fresh Run when:
 
-- the prior task is finished (the prior Run has a terminal event —
+- the prior task is finished (the prior Run has a terminal event -
   Resume will return `ErrRunAlreadyTerminal`)
 - you don't need the prior history; you want a clean slate (cheaper
   prompts, easier to reason about)
@@ -110,8 +110,8 @@ Starling version is allowed only when the schema version matches.
 
 ## What is the event log?
 
-The log is **the source of truth**. Everything `RunResult` reports —
-final text, costs, token totals, terminal kind, Merkle root — is
+The log is **the source of truth**. Everything `RunResult` reports -
+final text, costs, token totals, terminal kind, Merkle root - is
 re-derivable by reading the events. `RunResult` is a convenience
 shaped from the same data.
 
@@ -123,7 +123,7 @@ Three properties matter:
    `eventlog.Validate` walks the chain and reports the first break.
 2. **Canonically encoded.** Events go through `internal/cborenc`
    (RFC 8949 §4.2 deterministic CBOR), so byte-for-byte equality is
-   meaningful — that's how replay catches divergence at all.
+   meaningful - that's how replay catches divergence at all.
 3. **Backend-agnostic.** Memory, SQLite, and Postgres all satisfy
    the same `eventlog.EventLog` contract. The runtime never depends
    on backend-specific behavior beyond what the interface guarantees.
@@ -139,19 +139,19 @@ third-party event producers should use to stay compatible.
 
 1. Reads the recording from `log`.
 2. Builds a replay-mode provider from the recorded assistant
-   messages — no live model calls.
+   messages - no live model calls.
 3. Re-executes the agent loop, byte-comparing each re-emitted event
    against the recording.
 4. Returns `nil` on a clean replay, or
    `errors.Is(err, ErrNonDeterminism)` on the first divergence.
 
-Tools are re-executed live — that's by design. If your tool's output
+Tools are re-executed live - that's by design. If your tool's output
 depends on time, randomness, or external state, the divergence is
 real signal: tool determinism is your responsibility, and Starling
 gives you the primitives to lock it down (see
 [`step.SideEffect`, `step.Now`, `step.Random`](../step/step.go)).
 
-A divergence isn't a panic — it's a structured `Divergence` value
+A divergence isn't a panic - it's a structured `Divergence` value
 with the seq, kind, class, and reason. The inspector's replay view
 shows it inline; consumers can `errors.As(err, &replay.Divergence{})`
 to inspect it programmatically.
@@ -166,7 +166,7 @@ either way.
 
 > "Can I write events without `Agent.Run`?"
 
-Yes — that's the manual-writer pattern. As long as you respect the
+Yes - that's the manual-writer pattern. As long as you respect the
 chain invariants (Seq, PrevHash, canonical CBOR payloads) and use
 the [`merkle`](../merkle/merkle.go) helpers for the terminal root,
 the runtime, the validator, and the inspector treat your log

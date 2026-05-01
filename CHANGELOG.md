@@ -56,16 +56,16 @@ compatibility promise until the first GA (`v1.0.0`) tag.
 - Inspector replay divergence toast: when a `Diverged=true` step
   arrives over the SSE stream, an auto-dismissing banner flashes so
   the user sees it even if they're scrolled away from the row.
-- `examples/hello/` — minimal ~50-line first-agent.
+- `examples/hello/` - minimal ~50-line first-agent.
 - `docs/` directory: `getting-started.md` and `mental-model.md`
   (Wave A). More waves to follow.
-- `tool.Wrap(t, ...Middleware)` — compose middleware around a tool's
+- `tool.Wrap(t, ...Middleware)` - compose middleware around a tool's
   Execute without re-implementing `tool.Tool`. Outer middleware runs
   first; short-circuiting middleware can skip inner layers entirely.
-- `Agent.RunStream` — typed AgentEvent stream
+- `Agent.RunStream` - typed AgentEvent stream
   (`TextDelta`, `ToolCallStarted`, `ToolCallEnded`, `Done`) layered
   over the existing `Stream`. Always closes after a single `Done`.
-- `cmd/starling doctor` — quick health check covering binary
+- `cmd/starling doctor` - quick health check covering binary
   version, provider env vars, schema version, and chain validation
   on a supplied SQLite log.
 - Inspector preset chips on the runs dashboard: "with tool calls"
@@ -78,7 +78,7 @@ compatibility promise until the first GA (`v1.0.0`) tag.
   per user message). New runnable directories under `examples/` and
   doc pages under `docs/cookbook/`.
 - `tool.Typed` panic message now states "In must be a struct; got X
-  — top-level tool inputs must be JSON objects" with a wrap-it
+  - top-level tool inputs must be JSON objects" with a wrap-it
   suggestion.
 - `inspect <too many args>` returns a precise error instead of the
   misleading "missing <db> argument".
@@ -96,7 +96,7 @@ compatibility promise until the first GA (`v1.0.0`) tag.
   to avoid a theme flash.
 - New token system in `app.css`: 12-step neutral scale plus accent
   and four semantic colors, defined for both palettes. Every
-  surface, border, badge, and chip resolves from the tokens — no
+  surface, border, badge, and chip resolves from the tokens - no
   more hard-coded hex.
 - Topbar polished: brand glyph, active-page underline on
   Runs/Diff, an open-DB context chip (basename, hover for full
@@ -111,7 +111,7 @@ compatibility promise until the first GA (`v1.0.0`) tag.
     renders `.tok-key`, `.tok-string`, `.tok-num`, `.tok-bool`,
     `.tok-null`, `.tok-punct` spans; CSS colors them. No
     client-side parser, no JS dependency added.
-  - **Sticky meta header** inside the pane — kind, hash, prev,
+  - **Sticky meta header** inside the pane - kind, hash, prev,
     call stay visible while the payload scrolls.
   - **Click-to-copy** on hash readouts and the run-id heading.
     Inline copies fire a transient toast; explicit copy buttons
@@ -120,7 +120,7 @@ compatibility promise until the first GA (`v1.0.0`) tag.
   (yank current event's hash). Hint row in `run.html` updated.
 - Diff page payloads pick up the same syntax highlight via shared
   `highlightJSON` + `payload-json` styles.
-- New `inspect.WithDBPath` option — populates the topbar context
+- New `inspect.WithDBPath` option - populates the topbar context
   chip with the basename of the open DB; `cmd/starling-inspect`
   passes it automatically.
 
@@ -147,7 +147,7 @@ compatibility promise until the first GA (`v1.0.0`) tag.
   (`{shortID · started · status}`), so you no longer paste run
   IDs to compare. Falls back to the original text inputs if
   `ListRuns` errors. Diverging rows now use a 3-px colored left
-  rail instead of a full red/yellow background flood — the page
+  rail instead of a full red/yellow background flood - the page
   reads as differences, not alarms.
 - **Run detail page consolidated.** Run-head merges the live pill
   and validation badge onto one row; the duplicate "9 events"

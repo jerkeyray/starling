@@ -25,7 +25,7 @@ What this gives you:
 - The inspector lists each turn as a separate row, with totals you
   can read at a glance.
 - `Replay(ctx, log, runID, agent)` re-executes one message in
-  isolation — much faster than re-running the whole conversation to
+  isolation - much faster than re-running the whole conversation to
   reach the failure.
 - Budgets (cost, tokens, wall-clock) cap *each* message
   independently. A long conversation never accidentally bumps into a
@@ -35,16 +35,16 @@ What this gives you:
 If you need the model to "remember" prior messages, prepend the
 relevant context (last reply, a running summary, retrieved memory)
 into the goal text. The agent doesn't know or care that this is the
-N-th turn of a chat — every Run looks the same to it.
+N-th turn of a chat - every Run looks the same to it.
 
 ## Why not one Run for the whole conversation?
 
 Because `Agent.Run` always terminates. Its terminal event commits a
-Merkle root over every prior leaf in the chain — appending past it
+Merkle root over every prior leaf in the chain - appending past it
 would invalidate the commitment. The runtime refuses
 (`ErrRunAlreadyTerminal`).
 
-`Resume` exists for *crash recovery* on a non-terminal chain — a
+`Resume` exists for *crash recovery* on a non-terminal chain - a
 process died before writing the terminal event, and a successor
 process picks up where the first left off. It is not the chat
 continuation primitive.
@@ -69,6 +69,6 @@ many independent runs the log holds (three).
 
 ## See also
 
-- [Mental model — When to use one Run vs many](../mental-model.md#when-to-use-one-run-vs-many).
-- [Mental model — Resume vs new Run](../mental-model.md#resume-vs-new-run)
+- [Mental model - When to use one Run vs many](../mental-model.md#when-to-use-one-run-vs-many).
+- [Mental model - Resume vs new Run](../mental-model.md#resume-vs-new-run)
   for the crash-recovery case.

@@ -210,7 +210,7 @@ Conversation-history trimming. `Strategy` is e.g. `drop_oldest` or
 | `MessagesBefore` | `uint32` | `messages_before` |
 | `MessagesAfter` | `uint32` | `messages_after` |
 
-### `RunCompleted` (Kind=12) — terminal, success
+### `RunCompleted` (Kind=12) - terminal, success
 
 | Field | Type | Tag |
 | --- | --- | --- |
@@ -223,7 +223,7 @@ Conversation-history trimming. `Strategy` is e.g. `drop_oldest` or
 | `DurationMs` | `int64` | `duration_ms` |
 | `MerkleRoot` | `[]byte` | `merkle_root` |
 
-### `RunFailed` (Kind=13) — terminal, failure
+### `RunFailed` (Kind=13) - terminal, failure
 
 | Field | Type | Tag |
 | --- | --- | --- |
@@ -234,7 +234,7 @@ Conversation-history trimming. `Strategy` is e.g. `drop_oldest` or
 
 `RunErrorType`: `budget`, `max_turns`, `tool`, `provider`, `internal`.
 
-### `RunCancelled` (Kind=14) — terminal, cancellation
+### `RunCancelled` (Kind=14) - terminal, cancellation
 
 | Field | Type | Tag |
 | --- | --- | --- |
@@ -270,9 +270,9 @@ caller; nothing in the runtime parses unknown keys.
 
 ## See also
 
-- [`event/encoding.go`](../../event/encoding.go) — `Marshal`,
+- [`event/encoding.go`](../../event/encoding.go) - `Marshal`,
   `EncodePayload`, the typed `As*` accessors.
-- [reference/save-file.md](save-file.md) — how these events lay out
+- [reference/save-file.md](save-file.md) - how these events lay out
   on SQLite disk.
 - [mental-model.md](../mental-model.md) for the lifecycle
   ("RunStarted → TurnStarted → ... → terminal") in narrative form.

@@ -14,7 +14,7 @@ Given a recorded run and an `Agent` configured equivalently:
    `Provider.ID`/`APIVersion`/`Config.Model` disagree with the
    recording's `RunStarted` (override with `WithForceProvider`).
 3. Build a **replay-mode provider** from the recorded assistant
-   messages — no live model calls.
+   messages - no live model calls.
 4. Re-execute the agent loop with that provider, the original
    tools, and a **fresh in-memory sink log**.
 5. Compare each freshly-emitted event against the recording. The
@@ -35,18 +35,18 @@ err := starling.Replay(ctx, log, runID, agent, starling.WithForceProvider())
 
 Returned errors:
 
-- `nil` — replay matched the recording.
-- `errors.Is(err, starling.ErrNonDeterminism)` — divergence
+- `nil` - replay matched the recording.
+- `errors.Is(err, starling.ErrNonDeterminism)` - divergence
   detected; an `errors.As` into `*replay.Divergence` exposes
   `Seq`, `Kind`, `ExpectedKind`, `Class`, `Reason`.
-- `errors.Is(err, starling.ErrProviderModelMismatch)` — agent's
+- `errors.Is(err, starling.ErrProviderModelMismatch)` - agent's
   provider/model identity disagrees with the recording. Pass
   `WithForceProvider()` to bypass.
 - Tool errors propagate verbatim. A tool that returns an error in
   replay produces the same chain entry as the recording would have
   (so the divergence check remains meaningful).
 
-The CLI counterpart is `starling replay [--force] <db> <runID>` —
+The CLI counterpart is `starling replay [--force] <db> <runID>` -
 documented under [`cmd/starling/main.go`](../../cmd/starling/main.go)
 and only useful for dual-mode binaries that link an agent factory.
 
@@ -59,7 +59,7 @@ against the recording. That covers:
 - The `Payload` field (every per-kind struct verbatim, modulo the
   `Timestamp` which replay copies from the recording so chain
   hashes stay aligned).
-- The chain hash sequence — `Seq` and `PrevHash` are computed live
+- The chain hash sequence - `Seq` and `PrevHash` are computed live
   from the freshly-emitted bytes, so they match iff the bytes do.
 
 Tools are **re-executed live**. Their output is then byte-compared
@@ -137,7 +137,7 @@ func myFactory(ctx context.Context) (replay.Agent, error) {
 ```
 
 The factory **must** rebuild the agent equivalently to the
-original run — same tool registry, same `Config.Model`, same
+original run - same tool registry, same `Config.Model`, same
 provider info. The provider/model identity check rejects most
 misconfigurations before any work runs; tool registry drift is
 caught when the first tool call replays.
@@ -164,10 +164,10 @@ failed test rather than a production divergence.
 
 ## See also
 
-- [reference/events.md](events.md) — what's actually compared.
-- [reference/step-primitives.md](step-primitives.md) — how to
+- [reference/events.md](events.md) - what's actually compared.
+- [reference/step-primitives.md](step-primitives.md) - how to
   wrap tool nondeterminism so replay stays clean.
-- [reference/tools.md](tools.md) — tool-side replay
+- [reference/tools.md](tools.md) - tool-side replay
   expectations.
-- [`replay/replay.go`](../../replay/replay.go) — the public
+- [`replay/replay.go`](../../replay/replay.go) - the public
   package surface.

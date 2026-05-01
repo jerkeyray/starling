@@ -23,7 +23,7 @@ type Tool interface {
   in the event log).
 - **Description** is what the model reads to decide when to call.
 - **Schema** is JSON Schema. The bytes must be deterministic across
-  calls — `RunStarted.ToolRegistryHash` is computed over them.
+  calls - `RunStarted.ToolRegistryHash` is computed over them.
 - **Execute** is invoked by the agent loop, MCP wrappers, or your
   own code via `step.CallTool`.
 
@@ -64,11 +64,11 @@ standard library.
 
 Two sentinels in [`tool/tool.go`](../../tool/tool.go):
 
-- `tool.ErrPanicked` — the tool function panicked. `tool.Typed`
+- `tool.ErrPanicked` - the tool function panicked. `tool.Typed`
   recovers internally and wraps the panic; `step.CallTool` recovers
   for raw `Tool` implementations too. Surfaced on
   `ToolCallFailed.ErrorType == "panic"`.
-- `tool.ErrTransient` — the tool's failure is likely to succeed on
+- `tool.ErrTransient` - the tool's failure is likely to succeed on
   retry. Wrap with `fmt.Errorf("upstream 503: %w",
   tool.ErrTransient)`.
 
@@ -108,7 +108,7 @@ wrapped := tool.Wrap(myTool, withAuth, withTime)
 ```
 
 A middleware that returns without calling `inner` short-circuits
-the chain — useful for auth gates or input validation.
+the chain - useful for auth gates or input validation.
 
 `Wrap` preserves `Name`, `Description`, and `Schema`, so the
 schema hash recorded in `RunStarted.ToolRegistryHash` is identical
@@ -132,7 +132,7 @@ state, the divergence is real signal: use
 the nondeterminism.
 
 `SideEffectRecorded` events emitted from inside a tool are part of
-the same byte-compared chain — they have to match the recording.
+the same byte-compared chain - they have to match the recording.
 
 ## MCP tools
 
@@ -152,9 +152,9 @@ sizes bounded.
 
 ## See also
 
-- [reference/events.md](events.md) — `ToolCallScheduled`,
+- [reference/events.md](events.md) - `ToolCallScheduled`,
   `ToolCallCompleted`, `ToolCallFailed` payload tables.
-- [reference/replay.md](replay.md) — how recorded tool calls
+- [reference/replay.md](replay.md) - how recorded tool calls
   are compared during replay.
-- [`tool/builtin`](../../tool/builtin) — small set of stock tools
+- [`tool/builtin`](../../tool/builtin) - small set of stock tools
   shipped with the runtime.

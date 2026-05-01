@@ -29,7 +29,7 @@ tokens, sourced from each vendor's pricing page:
 | Family | Models priced | Notes |
 | --- | --- | --- |
 | OpenAI | `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo` | Base input/output. |
-| Anthropic | `claude-opus-4-{0,1,5,6,7}`, `claude-sonnet-4-{0,5,6}`, `claude-haiku-{4-5,3-5,3}` | Base rates only — see "Cache" below for the read/write multipliers. |
+| Anthropic | `claude-opus-4-{0,1,5,6,7}`, `claude-sonnet-4-{0,5,6}`, `claude-haiku-{4-5,3-5,3}` | Base rates only - see "Cache" below for the read/write multipliers. |
 
 A model not in the table returns `(0, false)` from `CostUSD` and
 emits one stderr line per process: `budget: no price entry for
@@ -73,7 +73,7 @@ base input rate:
 | Cache write, ≤ 5 min TTL | 1.25× |
 | Cache write, ≤ 1 h TTL | 2.0× |
 
-The base table in `budget/prices.go` only encodes input/output —
+The base table in `budget/prices.go` only encodes input/output -
 cache-tier multipliers are applied at the usage layer where the
 cache token counts come in. For consumers, the totals on
 `RunCompleted` and the per-turn `CostUSD` already reflect cache
@@ -107,7 +107,7 @@ msgs := []provider.Message{
 ```
 
 Other providers ignore the annotation. See
-[reference/events.md — Annotations keys](events.md#provider-annotations-keys).
+[reference/events.md - Annotations keys](events.md#provider-annotations-keys).
 
 ## Limits and gotchas
 
@@ -129,9 +129,9 @@ Other providers ignore the annotation. See
 
 ## See also
 
-- [reference/events.md](events.md) — the on-disk
+- [reference/events.md](events.md) - the on-disk
   `AssistantMessageCompleted` and terminal-event fields.
-- [`budget/prices.go`](../../budget/prices.go) — the built-in
+- [`budget/prices.go`](../../budget/prices.go) - the built-in
   table and `RegisterPricing` source.
-- [Budgets in README](../../README.md#budgets-and-retries) — how
+- [Budgets in README](../../README.md#budgets-and-retries) - how
   cost caps are wired into the agent loop.

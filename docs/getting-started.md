@@ -10,7 +10,7 @@ a Go module" to a working agent in about ten minutes.
 go get github.com/jerkeyray/starling@v0.1.0-beta.1
 ```
 
-Pin a tag — Starling is in beta and the API is allowed to change
+Pin a tag - Starling is in beta and the API is allowed to change
 between cuts. See [CHANGELOG.md](../CHANGELOG.md) for what each tag
 ships.
 
@@ -24,7 +24,7 @@ export OPENAI_API_KEY=sk-...
 ## Your first agent
 
 The full source for the snippet below is in
-[`examples/hello/main.go`](../examples/hello/main.go) — about 50 lines
+[`examples/hello/main.go`](../examples/hello/main.go) - about 50 lines
 end-to-end. Run it with `go run ./examples/hello`.
 
 ```go
@@ -92,7 +92,7 @@ agent.Tools = []tool.Tool{echo}
 ```
 
 Tool calls show up as their own events in the log, are retryable, and
-are deterministically replayable — see
+are deterministically replayable - see
 [mental-model.md](mental-model.md) for the lifecycle.
 
 ## Durable storage and the inspector
@@ -117,10 +117,10 @@ toggle and a context chip showing the open DB. The `/diff` page
 (linked from the topbar) lets you click-to-pick any two recorded
 runs from dropdowns and renders them side-by-side, aligned by
 sequence number, with diverging rows flagged via a colored left
-rail — useful for narrowing where two near-identical runs broke
+rail - useful for narrowing where two near-identical runs broke
 apart.
 
-A few keyboard shortcuts are worth knowing on the run page —
+A few keyboard shortcuts are worth knowing on the run page -
 `?` in the timeline header toggles a popover with the full list:
 
 - `j`/`k` (or arrows): move through the timeline.
@@ -142,8 +142,8 @@ err := starling.Replay(ctx, log_, runID, agent)
 ```
 
 A clean replay returns nil. If today's behavior diverges from what
-was recorded — different tool output, different model output, a new
-event in the middle — you get `errors.Is(err,
+was recorded - different tool output, different model output, a new
+event in the middle - you get `errors.Is(err,
 starling.ErrNonDeterminism)` and the inspector's replay view shows
 exactly which event mismatched.
 
@@ -154,11 +154,11 @@ providers is the point.
 
 ## Where to next
 
-- **[mental-model.md](mental-model.md)** — what a Run actually is,
+- **[mental-model.md](mental-model.md)** - what a Run actually is,
   when it terminates, when to use one Run versus many.
-- **[examples/m1_hello](../examples/m1_hello)** — a fuller dual-mode
+- **[examples/m1_hello](../examples/m1_hello)** - a fuller dual-mode
   binary that wraps run / inspect / replay / reset / show into a
   single CLI.
-- **[examples/incident_triage](../examples/incident_triage)** — a
+- **[examples/incident_triage](../examples/incident_triage)** - a
   production-shaped workflow with budgets, MCP tools, OpenTelemetry,
   and durable Postgres storage.
