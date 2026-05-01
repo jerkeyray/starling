@@ -15,10 +15,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/getting-started.md">Getting started</a> ·
-  <a href="docs/mental-model.md">Mental model</a> ·
-  <a href="docs/faq.md">FAQ</a> ·
-  <a href="examples/hello">Hello example</a>
+  <a href="https://starling.jerkeyray.com/docs/quickstart">Quickstart</a> ·
+  <a href="https://starling.jerkeyray.com/docs">Docs</a>
 </p>
 
 ---
