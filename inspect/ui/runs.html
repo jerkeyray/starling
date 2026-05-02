@@ -1,7 +1,8 @@
 {{define "content"}}
 {{$T := .Totals}}
+{{$P := .Pager}}
 <header class="page-head">
-  <h1>Runs <span class="count">{{len .Rows}} of {{.Total}}</span></h1>
+  <h1>Runs <span class="count">{{if .Rows}}{{$P.ShowingStart}}-{{$P.ShowingEnd}}{{else}}0{{end}} of {{$P.TotalMatching}}</span></h1>
   <dl class="totals" aria-label="aggregate totals across listed runs">
     <div><dt>runs</dt><dd>{{$T.Runs}}</dd></div>
     <div><dt>turns</dt><dd>{{$T.Turns}}</dd></div>
@@ -77,6 +78,11 @@
     {{end}}
   </tbody>
 </table>
+<nav class="pager" aria-label="runs pagination">
+  {{if $P.HasPrev}}<a class="tab" href="{{$P.PrevURL}}">previous</a>{{else}}<span class="tab disabled">previous</span>{{end}}
+  <span class="pager-label">page {{$P.Page}}</span>
+  {{if $P.HasNext}}<a class="tab" href="{{$P.NextURL}}">next</a>{{else}}<span class="tab disabled">next</span>{{end}}
+</nav>
 {{else}}
 <div class="empty">
   {{if .Status}}

@@ -638,6 +638,116 @@ func TestContract_ListRuns_NewestFirst(t *testing.T) {
 	}
 }
 
+func TestContract_ListRunsPage_FiltersAndPagination(t *testing.T) {
+	completedPayload, err := event.EncodePayload(event.RunCompleted{FinalText: "ok"})
+	if err != nil {
+		t.Fatalf("EncodePayload completed: %v", err)
+	}
+	failedPayload, err := event.EncodePayload(event.RunFailed{Error: "boom", ErrorType: event.RunErrorInternal})
+	if err != nil {
+		t.Fatalf("EncodePayload failed: %v", err)
+	}
+	cancelledPayload, err := event.EncodePayload(event.RunCancelled{Reason: "stop"})
+	if err != nil {
+		t.Fatalf("EncodePayload cancelled: %v", err)
+	}
+	toolPayload, err := event.EncodePayload(event.ToolCallScheduled{CallID: "c1", TurnID: "t1", ToolName: "fetch", Attempt: 1})
+	if err != nil {
+		t.Fatalf("EncodePayload tool: %v", err)
+	}
+
+	for _, bk := range backends(t) {
+		t.Run(bk.name, func(t *testing.T) {
+			log := bk.open(t)
+			pager := log.(eventlog.RunPageLister)
+			ctx := context.Background()
+
+			appendRun := func(id string, startTs int64, terminal event.Kind, terminalPayload []byte, withTool bool) {
+				t.Helper()
+				cb := &chainBuilder{}
+				ev := cb.next(t, id, id)
+				ev.Timestamp = startTs
+				encoded, err := event.Marshal(ev)
+				if err != nil {
+					t.Fatalf("Marshal start: %v", err)
+				}
+				cb.prevHash = event.Hash(encoded)
+				if err := log.Append(ctx, id, ev); err != nil {
+					t.Fatalf("append %s start: %v", id, err)
+				}
+				if withTool {
+					if err := log.Append(ctx, id, cb.nextKind(t, id, startTs+1, event.KindToolCallScheduled, toolPayload)); err != nil {
+						t.Fatalf("append %s tool: %v", id, err)
+					}
+				}
+				if terminal != 0 {
+					if err := log.Append(ctx, id, cb.nextKind(t, id, startTs+2, terminal, terminalPayload)); err != nil {
+						t.Fatalf("append %s terminal: %v", id, err)
+					}
+				}
+			}
+
+			appendRun("alpha-completed", 1_000_000, event.KindRunCompleted, completedPayload, false)
+			appendRun("beta-failed", 2_000_000, event.KindRunFailed, failedPayload, true)
+			appendRun("gamma-cancelled", 3_000_000, event.KindRunCancelled, cancelledPayload, false)
+			appendRun("delta-progress", 4_000_000, 0, nil, true)
+			appendRun("epsilon-completed", 5_000_000, event.KindRunCompleted, completedPayload, false)
+
+			page, err := pager.ListRunsPage(ctx, eventlog.RunPageOptions{Limit: 2, Offset: 1})
+			if err != nil {
+				t.Fatalf("ListRunsPage: %v", err)
+			}
+			if page.TotalMatching != 5 {
+				t.Fatalf("TotalMatching = %d, want 5", page.TotalMatching)
+			}
+			gotIDs := []string{page.Runs[0].RunID, page.Runs[1].RunID}
+			if !reflect.DeepEqual(gotIDs, []string{"delta-progress", "gamma-cancelled"}) {
+				t.Fatalf("page IDs = %v", gotIDs)
+			}
+
+			completed, err := pager.ListRunsPage(ctx, eventlog.RunPageOptions{Status: "completed"})
+			if err != nil {
+				t.Fatalf("completed ListRunsPage: %v", err)
+			}
+			if completed.TotalMatching != 2 {
+				t.Fatalf("completed total = %d, want 2", completed.TotalMatching)
+			}
+
+			progress, err := pager.ListRunsPage(ctx, eventlog.RunPageOptions{Status: "in progress"})
+			if err != nil {
+				t.Fatalf("progress ListRunsPage: %v", err)
+			}
+			if progress.TotalMatching != 1 || progress.Runs[0].RunID != "delta-progress" {
+				t.Fatalf("progress page = %+v", progress)
+			}
+
+			tools, err := pager.ListRunsPage(ctx, eventlog.RunPageOptions{RequireToolCalls: true})
+			if err != nil {
+				t.Fatalf("tools ListRunsPage: %v", err)
+			}
+			if tools.TotalMatching != 2 {
+				t.Fatalf("tools total = %d, want 2", tools.TotalMatching)
+			}
+
+			q, err := pager.ListRunsPage(ctx, eventlog.RunPageOptions{Query: "fail"})
+			if err != nil {
+				t.Fatalf("query ListRunsPage: %v", err)
+			}
+			if q.TotalMatching != 1 || q.Runs[0].RunID != "beta-failed" {
+				t.Fatalf("query page = %+v", q)
+			}
+
+			recent, err := pager.ListRunsPage(ctx, eventlog.RunPageOptions{StartedAfter: time.Unix(0, 3_500_000)})
+			if err != nil {
+				t.Fatalf("recent ListRunsPage: %v", err)
+			}
+			if recent.TotalMatching != 2 {
+				t.Fatalf("recent total = %d, want 2", recent.TotalMatching)
+			}
+		})
+	}
+}
+
 func TestContract_ListRuns_AfterClose(t *testing.T) {
 	for _, bk := range backends(t) {
 		t.Run(bk.name, func(t *testing.T) {

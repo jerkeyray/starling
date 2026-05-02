@@ -16,7 +16,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -420,28 +419,44 @@ func (p *postgresLog) streamLoop(ctx context.Context, runID string, ch chan<- ev
 // Uses the same correlated-subquery shape as SQLite for readability;
 // the (run_id, seq) PK covers both subqueries.
 func (p *postgresLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
-	if err := ctx.Err(); err != nil {
+	page, err := p.ListRunsPage(ctx, RunPageOptions{})
+	if err != nil {
 		return nil, err
 	}
+	return page.Runs, nil
+}
+
+func (p *postgresLog) ListRunsPage(ctx context.Context, opts RunPageOptions) (RunPage, error) {
+	if err := ctx.Err(); err != nil {
+		return RunPage{}, err
+	}
+	opts = normalizeRunPageOptions(opts)
 
 	p.mu.RLock()
 	if p.closed {
 		p.mu.RUnlock()
-		return nil, ErrLogClosed
+		return RunPage{}, ErrLogClosed
 	}
 	p.mu.RUnlock()
 
-	rows, err := p.db.QueryContext(ctx, `
-		SELECT
-			e.run_id,
-			(SELECT ts   FROM eventlog_events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
-			MAX(seq) AS last_seq,
-			(SELECT kind FROM eventlog_events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind
-		FROM eventlog_events e
-		GROUP BY e.run_id
-	`)
+	base, where, args := pgRunPageSQL(opts)
+	countSQL := `WITH runs AS (` + base + `) SELECT COUNT(*) FROM runs` + where
+	var total int
+	if err := p.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return RunPage{}, fmt.Errorf("eventlog/postgres: count runs: %w", err)
+	}
+
+	pageSQL := `WITH runs AS (` + base + `)
+		SELECT run_id, started_ts, last_seq, last_kind FROM runs` + where +
+		` ORDER BY started_ts DESC, run_id DESC`
+	pageArgs := append([]any(nil), args...)
+	if opts.Limit > 0 {
+		pageSQL += fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(pageArgs)+1, len(pageArgs)+2)
+		pageArgs = append(pageArgs, opts.Limit, opts.Offset)
+	}
+	rows, err := p.db.QueryContext(ctx, pageSQL, pageArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("eventlog/postgres: list runs: %w", err)
+		return RunPage{}, fmt.Errorf("eventlog/postgres: list runs: %w", err)
 	}
 	defer rows.Close()
 
@@ -454,7 +469,7 @@ func (p *postgresLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 			lastKind  int64
 		)
 		if err := rows.Scan(&runID, &startedTs, &lastSeq, &lastKind); err != nil {
-			return nil, fmt.Errorf("eventlog/postgres: list runs scan: %w", err)
+			return RunPage{}, fmt.Errorf("eventlog/postgres: list runs scan: %w", err)
 		}
 		out = append(out, RunSummary{
 			RunID:        runID,
@@ -464,13 +479,12 @@ func (p *postgresLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("eventlog/postgres: list runs rows: %w", err)
+		return RunPage{}, fmt.Errorf("eventlog/postgres: list runs rows: %w", err)
 	}
-	// See sqliteLog.ListRuns for the per-run aggregate cost note.
 	for i := range out {
 		evs, err := p.Read(ctx, out[i].RunID)
 		if err != nil {
-			return nil, fmt.Errorf("eventlog/postgres: list runs aggregate: %w", err)
+			return RunPage{}, fmt.Errorf("eventlog/postgres: list runs aggregate: %w", err)
 		}
 		t, tc, in, oTok, cost, durNs := aggregateRun(evs)
 		out[i].TurnCount = t
@@ -480,10 +494,30 @@ func (p *postgresLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 		out[i].CostUSD = cost
 		out[i].DurationMs = durNs / 1_000_000
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartedAt.After(out[j].StartedAt)
-	})
-	return out, nil
+	return RunPage{Runs: out, TotalMatching: total, Limit: opts.Limit, Offset: opts.Offset}, nil
+}
+
+func pgRunPageSQL(opts RunPageOptions) (base, where string, args []any) {
+	base = `
+		SELECT
+			e.run_id,
+			(SELECT ts   FROM eventlog_events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
+			MAX(e.seq) AS last_seq,
+			(SELECT kind FROM eventlog_events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind,
+			EXISTS(SELECT 1 FROM eventlog_events et WHERE et.run_id = e.run_id AND et.kind = $1) AS has_tools
+		FROM eventlog_events e
+		GROUP BY e.run_id`
+	args = append(args, int64(event.KindToolCallScheduled))
+	conds := runPageSQLConditions(opts, numberedPlaceholder(2))
+	parts := make([]string, 0, len(conds))
+	for _, cond := range conds {
+		parts = append(parts, cond.part)
+		args = append(args, cond.args...)
+	}
+	if len(parts) > 0 {
+		where = " WHERE " + strings.Join(parts, " AND ")
+	}
+	return base, where, args
 }
 
 // Close marks the log closed. It deliberately does NOT close the

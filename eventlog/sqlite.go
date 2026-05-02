@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -415,32 +415,44 @@ func (s *sqliteLog) streamLoop(ctx context.Context, runID string, ch chan<- even
 // run; a second query fetches the matching timestamps and kinds. The
 // result is sorted newest-first by StartedAt.
 func (s *sqliteLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
-	if err := ctx.Err(); err != nil {
+	page, err := s.ListRunsPage(ctx, RunPageOptions{})
+	if err != nil {
 		return nil, err
 	}
+	return page.Runs, nil
+}
+
+func (s *sqliteLog) ListRunsPage(ctx context.Context, opts RunPageOptions) (RunPage, error) {
+	if err := ctx.Err(); err != nil {
+		return RunPage{}, err
+	}
+	opts = normalizeRunPageOptions(opts)
 
 	s.mu.RLock()
 	if s.closed {
 		s.mu.RUnlock()
-		return nil, ErrLogClosed
+		return RunPage{}, ErrLogClosed
 	}
 	s.mu.RUnlock()
 
-	// One pass: per run_id, get min(seq) for "started" and max(seq) for
-	// "last", then join back to events to pull ts (for first) and kind
-	// (for last). A correlated subquery is simplest and the (run_id, seq)
-	// PK index covers both lookups.
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT
-			run_id,
-			(SELECT ts   FROM eventlog_events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
-			MAX(seq) AS last_seq,
-			(SELECT kind FROM eventlog_events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind
-		FROM eventlog_events e
-		GROUP BY run_id
-	`)
+	base, where, args := sqliteRunPageSQL(opts)
+	countSQL := `WITH runs AS (` + base + `) SELECT COUNT(*) FROM runs` + where
+	var total int
+	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return RunPage{}, fmt.Errorf("eventlog/sqlite: count runs: %w", err)
+	}
+
+	pageSQL := `WITH runs AS (` + base + `)
+		SELECT run_id, started_ts, last_seq, last_kind FROM runs` + where +
+		` ORDER BY started_ts DESC, run_id DESC`
+	pageArgs := append([]any(nil), args...)
+	if opts.Limit > 0 {
+		pageSQL += ` LIMIT ? OFFSET ?`
+		pageArgs = append(pageArgs, opts.Limit, opts.Offset)
+	}
+	rows, err := s.db.QueryContext(ctx, pageSQL, pageArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("eventlog/sqlite: list runs: %w", err)
+		return RunPage{}, fmt.Errorf("eventlog/sqlite: list runs: %w", err)
 	}
 	defer rows.Close()
 
@@ -453,7 +465,7 @@ func (s *sqliteLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 			lastKind  int64
 		)
 		if err := rows.Scan(&runID, &startedTs, &lastSeq, &lastKind); err != nil {
-			return nil, fmt.Errorf("eventlog/sqlite: list runs scan: %w", err)
+			return RunPage{}, fmt.Errorf("eventlog/sqlite: list runs scan: %w", err)
 		}
 		out = append(out, RunSummary{
 			RunID:        runID,
@@ -463,18 +475,12 @@ func (s *sqliteLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("eventlog/sqlite: list runs rows: %w", err)
+		return RunPage{}, fmt.Errorf("eventlog/sqlite: list runs rows: %w", err)
 	}
-	// Per-run aggregates: re-read each run and fold its events. The
-	// row count is bounded by the number of distinct runs; payloads
-	// are CBOR-decoded only for AssistantMessageCompleted, which is
-	// O(turns) per run. Acceptable for interactive list views; if a
-	// log grows past tens of thousands of runs the inspector should
-	// paginate instead of scaling this loop.
 	for i := range out {
 		evs, err := s.Read(ctx, out[i].RunID)
 		if err != nil {
-			return nil, fmt.Errorf("eventlog/sqlite: list runs aggregate: %w", err)
+			return RunPage{}, fmt.Errorf("eventlog/sqlite: list runs aggregate: %w", err)
 		}
 		t, tc, in, oTok, cost, durNs := aggregateRun(evs)
 		out[i].TurnCount = t
@@ -484,11 +490,30 @@ func (s *sqliteLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 		out[i].CostUSD = cost
 		out[i].DurationMs = durNs / 1_000_000
 	}
-	// Newest first.
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartedAt.After(out[j].StartedAt)
-	})
-	return out, nil
+	return RunPage{Runs: out, TotalMatching: total, Limit: opts.Limit, Offset: opts.Offset}, nil
+}
+
+func sqliteRunPageSQL(opts RunPageOptions) (base, where string, args []any) {
+	base = `
+		SELECT
+			e.run_id,
+			(SELECT ts   FROM eventlog_events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
+			MAX(e.seq) AS last_seq,
+			(SELECT kind FROM eventlog_events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind,
+			EXISTS(SELECT 1 FROM eventlog_events et WHERE et.run_id = e.run_id AND et.kind = ?) AS has_tools
+		FROM eventlog_events e
+		GROUP BY e.run_id`
+	args = append(args, int64(event.KindToolCallScheduled))
+	conds := runPageSQLConditions(opts, questionPlaceholder())
+	parts := make([]string, 0, len(conds))
+	for _, cond := range conds {
+		parts = append(parts, cond.part)
+		args = append(args, cond.args...)
+	}
+	if len(parts) > 0 {
+		where = " WHERE " + strings.Join(parts, " AND ")
+	}
+	return base, where, args
 }
 
 func (s *sqliteLog) Close() error {

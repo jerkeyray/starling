@@ -481,6 +481,23 @@ h1 { font-size: 1.35rem; margin-top: 0; letter-spacing: -0.015em; font-weight: 6
 .tab:last-child { border-right: 0; }
 .tab:hover { color: var(--fg); background: var(--hover); }
 .tab.active { color: white; background: var(--accent); }
+.tab.disabled { color: var(--muted); opacity: 0.45; pointer-events: none; }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  padding: 0.8rem 0 0;
+}
+.pager .tab {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.pager-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
 
 .preset-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .preset-chips .chip {

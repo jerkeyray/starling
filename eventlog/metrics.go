@@ -51,6 +51,19 @@ func (o *observedLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 	return nil, nil
 }
 
+// ListRunsPage forwards through to the wrapped log when it implements
+// RunPageLister, or falls back to ListRuns filtering for older backends.
+func (o *observedLog) ListRunsPage(ctx context.Context, opts RunPageOptions) (RunPage, error) {
+	if rl, ok := o.EventLog.(RunPageLister); ok {
+		return rl.ListRunsPage(ctx, opts)
+	}
+	runs, err := o.ListRuns(ctx)
+	if err != nil {
+		return RunPage{}, err
+	}
+	return paginateRunSummaries(runs, opts), nil
+}
+
 func (o *observedLog) currentVersion(ctx context.Context) (int, error) {
 	if m, ok := o.EventLog.(migrater); ok {
 		return m.currentVersion(ctx)

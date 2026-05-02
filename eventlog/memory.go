@@ -243,15 +243,23 @@ func (m *memoryLog) Stream(ctx context.Context, runID string) (<-chan event.Even
 }
 
 func (m *memoryLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
-	if err := ctx.Err(); err != nil {
+	page, err := m.ListRunsPage(ctx, RunPageOptions{})
+	if err != nil {
 		return nil, err
+	}
+	return page.Runs, nil
+}
+
+func (m *memoryLog) ListRunsPage(ctx context.Context, opts RunPageOptions) (RunPage, error) {
+	if err := ctx.Err(); err != nil {
+		return RunPage{}, err
 	}
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	if m.closed {
-		return nil, ErrLogClosed
+		return RunPage{}, ErrLogClosed
 	}
 
 	out := make([]RunSummary, 0, len(m.runs))
@@ -278,7 +286,7 @@ func (m *memoryLog) ListRuns(ctx context.Context) ([]RunSummary, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].StartedAt.After(out[j].StartedAt)
 	})
-	return out, nil
+	return paginateRunSummaries(out, opts), nil
 }
 
 func (m *memoryLog) Close() error {

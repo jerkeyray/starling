@@ -1,12 +1,20 @@
 package inspect
 
 import (
+	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
 	"github.com/jerkeyray/starling/event"
 	"github.com/jerkeyray/starling/eventlog"
+)
+
+const (
+	defaultRunsPageSize = 50
+	maxRunsPageSize     = 200
+	diffOptionsLimit    = 100
 )
 
 // handleRuns renders the runs-list landing page. Optional
@@ -16,28 +24,138 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	summaries, err := s.lister.ListRuns(r.Context())
+	statusFilter := r.URL.Query().Get("status")
+	query := r.URL.Query().Get("q")
+	preset := r.URL.Query().Get("preset")
+	pageNum := parsePositiveInt(r.URL.Query().Get("page"), 1)
+	perPage := parsePositiveInt(r.URL.Query().Get("per_page"), defaultRunsPageSize)
+	if perPage > maxRunsPageSize {
+		perPage = maxRunsPageSize
+	}
+	offset := (pageNum - 1) * perPage
+
+	opts := eventlog.RunPageOptions{
+		Limit:  perPage,
+		Offset: offset,
+		Status: statusFilter,
+		Query:  query,
+	}
+	switch preset {
+	case "tools":
+		opts.RequireToolCalls = true
+	case "hour":
+		opts.StartedAfter = time.Now().Add(-time.Hour)
+	}
+	page, err := s.listRunPage(r.Context(), opts)
 	if err != nil {
 		http.Error(w, "list runs: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	rows := rowsFromSummaries(summaries)
-	statusFilter := r.URL.Query().Get("status")
-	rows = filterByStatus(rows, statusFilter)
-	query := r.URL.Query().Get("q")
-	rows = filterByQuery(rows, query)
-	preset := r.URL.Query().Get("preset")
-	rows = filterByPreset(rows, preset, time.Now())
+	if len(page.Runs) == 0 && page.TotalMatching > 0 && offset >= page.TotalMatching {
+		pageNum = (page.TotalMatching + perPage - 1) / perPage
+		opts.Offset = (pageNum - 1) * perPage
+		page, err = s.listRunPage(r.Context(), opts)
+		if err != nil {
+			http.Error(w, "list runs: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	rows := rowsFromSummaries(page.Runs)
+	pager := runsPager{
+		Page:          pageNum,
+		PerPage:       perPage,
+		TotalMatching: page.TotalMatching,
+		ShowingStart:  page.Offset + 1,
+		ShowingEnd:    page.Offset + len(rows),
+	}
+	if len(rows) == 0 {
+		pager.ShowingStart = 0
+	}
+	if page.Offset > 0 {
+		pager.HasPrev = true
+		pager.PrevURL = runsPageURL(r.URL.Query(), pageNum-1, perPage)
+	}
+	if page.Offset+len(rows) < page.TotalMatching {
+		pager.HasNext = true
+		pager.NextURL = runsPageURL(r.URL.Query(), pageNum+1, perPage)
+	}
 
 	s.tpl.render(w, "runs.html", http.StatusOK, s.applyChrome(map[string]any{
 		"Title":  "Runs",
 		"Rows":   rows,
-		"Total":  len(summaries),
+		"Total":  page.TotalMatching,
 		"Status": statusFilter,
 		"Query":  query,
 		"Preset": preset,
 		"Totals": dashTotalsFromRows(rows),
+		"Pager":  pager,
 	}, "runs"))
+}
+
+func (s *Server) listRunPage(ctx context.Context, opts eventlog.RunPageOptions) (eventlog.RunPage, error) {
+	if pager, ok := s.lister.(eventlog.RunPageLister); ok {
+		return pager.ListRunsPage(ctx, opts)
+	}
+	summaries, err := s.lister.ListRuns(ctx)
+	if err != nil {
+		return eventlog.RunPage{}, err
+	}
+	rows := rowsFromSummaries(summaries)
+	rows = filterByStatus(rows, opts.Status)
+	rows = filterByQuery(rows, opts.Query)
+	if opts.RequireToolCalls {
+		rows = filterByPreset(rows, "tools", time.Now())
+	}
+	if !opts.StartedAfter.IsZero() {
+		rows = filterRowsStartedAfter(rows, opts.StartedAfter)
+	}
+	total := len(rows)
+	start := opts.Offset
+	if start < 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+	end := total
+	if opts.Limit > 0 && start+opts.Limit < end {
+		end = start + opts.Limit
+	}
+	return eventlog.RunPage{
+		Runs:          summariesFromRows(rows[start:end]),
+		TotalMatching: total,
+		Limit:         opts.Limit,
+		Offset:        start,
+	}, nil
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+func runsPageURL(base url.Values, page, perPage int) string {
+	q := cloneValues(base)
+	q.Set("page", strconv.Itoa(page))
+	if perPage != defaultRunsPageSize {
+		q.Set("per_page", strconv.Itoa(perPage))
+	} else {
+		q.Del("per_page")
+	}
+	return "/?" + q.Encode()
+}
+
+func cloneValues(v url.Values) url.Values {
+	out := make(url.Values, len(v))
+	for k, vals := range v {
+		cp := make([]string, len(vals))
+		copy(cp, vals)
+		out[k] = cp
+	}
+	return out
 }
 
 // handleRun renders a single run's two-pane detail view: timeline on

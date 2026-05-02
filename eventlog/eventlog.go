@@ -40,6 +40,26 @@ type RunSummary struct {
 	DurationMs    int64 // wall time from RunStarted to last event; 0 while still running's first event
 }
 
+// RunPageOptions filters and pages a run listing. Limit <= 0 means
+// no limit; Offset < 0 is treated as 0 by implementations.
+type RunPageOptions struct {
+	Limit            int
+	Offset           int
+	Status           string
+	Query            string
+	StartedAfter     time.Time
+	RequireToolCalls bool
+}
+
+// RunPage is the result of a paged run listing. TotalMatching is the
+// number of runs matching the filters before Limit/Offset are applied.
+type RunPage struct {
+	Runs          []RunSummary
+	TotalMatching int
+	Limit         int
+	Offset        int
+}
+
 // EventLog is an append-only, per-run ledger of events.
 //
 // Implementations must enforce the hash-chain invariants on Append: the first
@@ -100,6 +120,13 @@ type RunLister interface {
 	// ordered by StartedAt descending (newest first). An empty log
 	// returns (nil, nil).
 	ListRuns(ctx context.Context) ([]RunSummary, error)
+}
+
+// RunPageLister is implemented by backends that can filter and page
+// run listings before materializing every run summary. Inspector uses
+// this when available and falls back to RunLister for custom backends.
+type RunPageLister interface {
+	ListRunsPage(ctx context.Context, opts RunPageOptions) (RunPage, error)
 }
 
 // ErrLogClosed is returned by any operation on a closed EventLog.

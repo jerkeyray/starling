@@ -1,11 +1,17 @@
 package inspect
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jerkeyray/starling/event"
+	"github.com/jerkeyray/starling/eventlog"
 	"golang.org/x/net/html"
 )
 
@@ -33,11 +39,65 @@ func TestDOM_RunsPage_QueryRoundTrips(t *testing.T) {
 	}
 }
 
+func TestDOM_RunsPage_Paginates(t *testing.T) {
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+	for i := 0; i < 5; i++ {
+		seedRunStartedAt(t, log, "run-"+string(rune('a'+i)), time.Unix(0, int64(i+1)))
+	}
+	srv, err := New(log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	hs := httptest.NewServer(srv)
+	t.Cleanup(hs.Close)
+
+	body := getBody(t, hs.URL+"/?per_page=2")
+	if !strings.Contains(body, "1-2") || !strings.Contains(body, "of 5") || !strings.Contains(body, "next") {
+		t.Fatalf("page 1 did not render expected pagination: %q", body)
+	}
+	if strings.Contains(body, "run-a") {
+		t.Fatalf("page 1 included oldest run unexpectedly")
+	}
+
+	body = getBody(t, hs.URL+"/?per_page=2&page=2")
+	if !strings.Contains(body, "3-4") || !strings.Contains(body, "previous") || !strings.Contains(body, "next") {
+		t.Fatalf("page 2 did not render expected pagination: %q", body)
+	}
+
+	body = getBody(t, hs.URL+"/?per_page=2&page=99")
+	if !strings.Contains(body, "5-5") || strings.Contains(body, "next</a>") {
+		t.Fatalf("out-of-range page did not clamp to final page: %q", body)
+	}
+}
+
 func TestDOM_RunPage_HasTimelineAndReplayLink(t *testing.T) {
 	hs, runID := authServer(t)
 	body := getBody(t, hs.URL+"/run/"+runID)
 	if !hasNodeWithID(t, body, "timeline") {
 		t.Errorf("run page missing #timeline")
+	}
+}
+
+func TestDOM_DiffOptions_CappedToLatest100(t *testing.T) {
+	log := eventlog.NewInMemory()
+	t.Cleanup(func() { _ = log.Close() })
+	for i := 0; i < 105; i++ {
+		seedRunStartedAt(t, log, fmt.Sprintf("run-%03d", i), time.Unix(0, int64(i+1)))
+	}
+	srv, err := New(log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	hs := httptest.NewServer(srv)
+	t.Cleanup(hs.Close)
+
+	body := getBody(t, hs.URL+"/diff")
+	if strings.Contains(body, "run-000") || strings.Contains(body, "run-004") {
+		t.Fatalf("diff options include oldest runs despite cap")
+	}
+	if !strings.Contains(body, "run-104") {
+		t.Fatalf("diff options missing latest run")
 	}
 }
 
@@ -86,4 +146,27 @@ func hasNodeWithID(t *testing.T, body, id string) bool {
 	}
 	walk(doc)
 	return found
+}
+
+func seedRunStartedAt(t *testing.T, log eventlog.EventLog, runID string, ts time.Time) {
+	t.Helper()
+	payload, err := event.EncodePayload(event.RunStarted{
+		SchemaVersion: event.SchemaVersion,
+		Goal:          runID,
+		ProviderID:    "fake",
+		ModelID:       "m",
+	})
+	if err != nil {
+		t.Fatalf("EncodePayload: %v", err)
+	}
+	ev := event.Event{
+		RunID:     runID,
+		Seq:       1,
+		Timestamp: ts.UnixNano(),
+		Kind:      event.KindRunStarted,
+		Payload:   payload,
+	}
+	if err := log.Append(context.Background(), runID, ev); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
 }

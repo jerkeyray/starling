@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/jerkeyray/starling/event"
+	"github.com/jerkeyray/starling/eventlog"
 )
 
 // handleDiff renders a side-by-side diff between two runs, aligned by
@@ -68,9 +69,22 @@ func (s *Server) diffOptions(ctx context.Context) []diffOption {
 	if s.lister == nil {
 		return nil
 	}
-	runs, err := s.lister.ListRuns(ctx)
-	if err != nil {
-		return nil
+	var runs []eventlog.RunSummary
+	if pager, ok := s.lister.(eventlog.RunPageLister); ok {
+		page, err := pager.ListRunsPage(ctx, eventlog.RunPageOptions{Limit: diffOptionsLimit})
+		if err != nil {
+			return nil
+		}
+		runs = page.Runs
+	} else {
+		all, err := s.lister.ListRuns(ctx)
+		if err != nil {
+			return nil
+		}
+		if len(all) > diffOptionsLimit {
+			all = all[:diffOptionsLimit]
+		}
+		runs = all
 	}
 	out := make([]diffOption, len(runs))
 	for i, rs := range runs {

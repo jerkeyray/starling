@@ -64,6 +64,18 @@ type dashTotals struct {
 	InProgressRuns int
 }
 
+type runsPager struct {
+	Page          int
+	PerPage       int
+	TotalMatching int
+	ShowingStart  int
+	ShowingEnd    int
+	HasPrev       bool
+	HasNext       bool
+	PrevURL       string
+	NextURL       string
+}
+
 func dashTotalsFromRows(rows []runRow) dashTotals {
 	var t dashTotals
 	t.Runs = len(rows)
@@ -83,6 +95,39 @@ func dashTotalsFromRows(rows []runRow) dashTotals {
 		}
 	}
 	return t
+}
+
+func summariesFromRows(rows []runRow) []eventlog.RunSummary {
+	out := make([]eventlog.RunSummary, 0, len(rows))
+	for _, r := range rows {
+		started, _ := time.Parse(time.RFC3339, r.StartedISO)
+		out = append(out, eventlog.RunSummary{
+			RunID:         r.RunID,
+			StartedAt:     started,
+			LastSeq:       r.EventCount,
+			TerminalKind:  kindForStatusLabel(r.StatusLabel),
+			TurnCount:     r.TurnCount,
+			ToolCallCount: r.ToolCallCount,
+			InputTokens:   r.InputTokens,
+			OutputTokens:  r.OutputTokens,
+			CostUSD:       r.CostUSD,
+			DurationMs:    r.DurationMs,
+		})
+	}
+	return out
+}
+
+func kindForStatusLabel(label string) event.Kind {
+	switch label {
+	case "completed":
+		return event.KindRunCompleted
+	case "failed":
+		return event.KindRunFailed
+	case "cancelled":
+		return event.KindRunCancelled
+	default:
+		return event.KindRunStarted
+	}
 }
 
 // statusOf classifies the run's most recent event into a human label
@@ -187,6 +232,20 @@ func filterByPreset(rows []runRow, preset string, now time.Time) []runRow {
 		return out
 	}
 	return rows
+}
+
+func filterRowsStartedAfter(rows []runRow, cutoff time.Time) []runRow {
+	out := make([]runRow, 0, len(rows))
+	for _, r := range rows {
+		t, err := time.Parse(time.RFC3339, r.StartedISO)
+		if err != nil {
+			continue
+		}
+		if t.After(cutoff) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // eventRow is one row in the timeline pane of the run detail page.
