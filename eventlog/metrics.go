@@ -16,7 +16,7 @@ type AppendObserver interface {
 
 // WithMetrics wraps log so every Append call reports a sample to obs.
 // Read, Stream, ListRuns, Close, and any other interfaces (RunLister,
-// migrater) are forwarded through unchanged.
+// RunPageLister, RunPruner, migrater) are forwarded through unchanged.
 //
 // Useful for callers that drive Append directly (outside step.emit) and
 // want the same latency histogram coverage the agent loop has.
@@ -62,6 +62,14 @@ func (o *observedLog) ListRunsPage(ctx context.Context, opts RunPageOptions) (Ru
 		return RunPage{}, err
 	}
 	return paginateRunSummaries(runs, opts), nil
+}
+
+// PruneRuns forwards through to the wrapped log when it implements RunPruner.
+func (o *observedLog) PruneRuns(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	if p, ok := o.EventLog.(RunPruner); ok {
+		return p.PruneRuns(ctx, opts)
+	}
+	return PruneReport{}, nil
 }
 
 func (o *observedLog) currentVersion(ctx context.Context) (int, error) {

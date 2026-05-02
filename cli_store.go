@@ -16,3 +16,11 @@ func openStore(path string) (eventlog.EventLog, error) {
 	}
 	return store, nil
 }
+
+func openWritableStore(path string) (eventlog.EventLog, error) {
+	store, err := eventlog.NewSQLite(path)
+	if err != nil {
+		return nil, fmt.Errorf("open log %q: %w", path, err)
+	}
+	return store, nil
+}

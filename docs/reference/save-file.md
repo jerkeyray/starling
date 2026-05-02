@@ -149,6 +149,19 @@ for _, ev := range evs {
 `starling export <db> <runID>` does the same, NDJSON-style, for
 piping into `jq`.
 
+For retention, `starling prune` deletes whole runs only, never a suffix
+of a run:
+
+```bash
+starling prune --older-than 720h runs.db          # dry run
+starling prune --older-than 720h --confirm runs.db
+starling prune --before 2026-01-01T00:00:00Z --status completed runs.db
+```
+
+The default selection is terminal runs (`completed`, `failed`, and
+`cancelled`) older than the cutoff. In-progress runs are kept unless
+you pass `--status "in progress"` or `--include-in-progress`.
+
 ## Postgres backend
 
 `eventlog.NewPostgres` uses the same logical schema with

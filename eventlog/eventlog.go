@@ -60,6 +60,42 @@ type RunPage struct {
 	Offset        int
 }
 
+// PruneOptions selects old runs for deletion. Retention/pruning is not
+// part of the append-only EventLog contract; it is an explicit
+// operator action for logs whose retention window has expired.
+type PruneOptions struct {
+	// Before deletes runs whose StartedAt is strictly before this time.
+	// It must be non-zero.
+	Before time.Time
+
+	// Status optionally narrows deletion to "completed", "failed",
+	// "cancelled", or "in progress". Empty means all terminal runs:
+	// completed, failed, and cancelled.
+	Status string
+
+	// IncludeInProgress permits pruning in-progress runs when Status is
+	// empty. It is ignored when Status is set. Leave false for normal
+	// retention jobs.
+	IncludeInProgress bool
+
+	// Limit caps the number of runs pruned in one call. Limit <= 0 means
+	// no cap.
+	Limit int
+
+	// DryRun reports what would be removed without deleting anything.
+	DryRun bool
+}
+
+// PruneReport summarizes a retention pass.
+type PruneReport struct {
+	MatchedRuns   int
+	DeletedRuns   int
+	MatchedEvents int
+	DeletedEvents int
+	DryRun        bool
+	RunIDs        []string
+}
+
 // EventLog is an append-only, per-run ledger of events.
 //
 // Implementations must enforce the hash-chain invariants on Append: the first
@@ -127,6 +163,13 @@ type RunLister interface {
 // this when available and falls back to RunLister for custom backends.
 type RunPageLister interface {
 	ListRunsPage(ctx context.Context, opts RunPageOptions) (RunPage, error)
+}
+
+// RunPruner is implemented by backends that support explicit retention
+// cleanup. Pruning deletes whole runs only; it never removes a suffix of
+// a run, which would invalidate the recorded hash chain.
+type RunPruner interface {
+	PruneRuns(ctx context.Context, opts PruneOptions) (PruneReport, error)
 }
 
 // ErrLogClosed is returned by any operation on a closed EventLog.

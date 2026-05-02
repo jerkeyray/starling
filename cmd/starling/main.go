@@ -6,6 +6,7 @@
 //
 //	starling validate <db> [<runID>]   # hash-chain + Merkle check
 //	starling export   <db> <runID>     # dump events as NDJSON for jq
+//	starling prune    [flags] <db>     # delete old whole runs after dry-run
 //	starling inspect  [flags] <db>     # local web inspector (read-only)
 //	starling replay   <db> <runID>     # headless replay (dual-mode only)
 //
@@ -14,7 +15,8 @@
 // be linked into the binary. Users who need replay-from-CLI should
 // build a dual-mode wrapper around starling.ReplayCommand.
 //
-// All subcommands open the event log read-only.
+// Most subcommands open the event log read-only. `migrate` and
+// `prune --confirm` intentionally open it writable.
 package main
 
 import (
@@ -41,6 +43,8 @@ func main() {
 		err = starling.ValidateCommand().Run(args)
 	case "export":
 		err = starling.ExportCommand().Run(args)
+	case "prune":
+		err = starling.PruneCommand().Run(args)
 	case "inspect":
 		c := starling.InspectCommand(nil) // view-only: stock binary has no factory
 		c.Name = "inspect"
@@ -73,6 +77,7 @@ func usage(w *os.File) {
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  validate   Validate the hash chain of one run (or every run).")
 	fmt.Fprintln(w, "  export     Dump one run as NDJSON (one event per line).")
+	fmt.Fprintln(w, "  prune      Delete old whole runs after an explicit dry-run.")
 	fmt.Fprintln(w, "  inspect    Serve the local web inspector (read-only).")
 	fmt.Fprintln(w, "  replay     Headless replay of one run. Requires a dual-mode binary.")
 	fmt.Fprintln(w, "  migrate    Apply pending schema migrations to a SQLite event log.")

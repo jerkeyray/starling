@@ -493,6 +493,88 @@ func (s *sqliteLog) ListRunsPage(ctx context.Context, opts RunPageOptions) (RunP
 	return RunPage{Runs: out, TotalMatching: total, Limit: opts.Limit, Offset: opts.Offset}, nil
 }
 
+func (s *sqliteLog) PruneRuns(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	if err := ctx.Err(); err != nil {
+		return PruneReport{}, err
+	}
+	opts = normalizePruneOptions(opts)
+	if err := validatePruneOptions(opts); err != nil {
+		return PruneReport{}, err
+	}
+	if s.readOnly && !opts.DryRun {
+		return PruneReport{}, ErrReadOnly
+	}
+
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return PruneReport{}, ErrLogClosed
+	}
+	s.mu.RUnlock()
+
+	base, where, args := sqlitePruneSQL(opts)
+	selectSQL := `WITH runs AS (` + base + `)
+		SELECT run_id, event_count FROM runs` + where +
+		` ORDER BY started_ts ASC, run_id ASC`
+	if opts.Limit > 0 {
+		selectSQL += ` LIMIT ?`
+		args = append(args, opts.Limit)
+	}
+	rows, err := s.db.QueryContext(ctx, selectSQL, args...)
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/sqlite: prune select: %w", err)
+	}
+	defer rows.Close()
+
+	report := PruneReport{DryRun: opts.DryRun}
+	for rows.Next() {
+		var runID string
+		var eventCount int
+		if err := rows.Scan(&runID, &eventCount); err != nil {
+			return PruneReport{}, fmt.Errorf("eventlog/sqlite: prune scan: %w", err)
+		}
+		report.RunIDs = append(report.RunIDs, runID)
+		report.MatchedRuns++
+		report.MatchedEvents += eventCount
+	}
+	if err := rows.Err(); err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/sqlite: prune rows: %w", err)
+	}
+	if opts.DryRun || len(report.RunIDs) == 0 {
+		return report, nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/sqlite: prune begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	ph := make([]string, len(report.RunIDs))
+	delArgs := make([]any, len(report.RunIDs))
+	for i, runID := range report.RunIDs {
+		ph[i] = "?"
+		delArgs[i] = runID
+	}
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM eventlog_events WHERE run_id IN (`+strings.Join(ph, ", ")+`)`,
+		delArgs...,
+	)
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/sqlite: prune delete: %w", err)
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/sqlite: prune rows affected: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/sqlite: prune commit: %w", err)
+	}
+	report.DeletedRuns = report.MatchedRuns
+	report.DeletedEvents = int(deleted)
+	return report, nil
+}
+
 func sqliteRunPageSQL(opts RunPageOptions) (base, where string, args []any) {
 	base = `
 		SELECT
@@ -513,6 +595,30 @@ func sqliteRunPageSQL(opts RunPageOptions) (base, where string, args []any) {
 	if len(parts) > 0 {
 		where = " WHERE " + strings.Join(parts, " AND ")
 	}
+	return base, where, args
+}
+
+func sqlitePruneSQL(opts PruneOptions) (base, where string, args []any) {
+	base = `
+		SELECT
+			e.run_id,
+			(SELECT ts   FROM eventlog_events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
+			(SELECT kind FROM eventlog_events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind,
+			COUNT(*) AS event_count
+		FROM eventlog_events e
+		GROUP BY e.run_id`
+	terminal, inProgress := pruneAllowedKinds(opts)
+	next := questionPlaceholder()
+	conds := []runPageSQLCond{
+		{part: "started_ts < " + next(), args: []any{runStartedAfterUnixNano(opts.Before)}},
+		runKindsSQLCond("last_kind", terminal, inProgress, next),
+	}
+	parts := make([]string, 0, len(conds))
+	for _, cond := range conds {
+		parts = append(parts, cond.part)
+		args = append(args, cond.args...)
+	}
+	where = " WHERE " + strings.Join(parts, " AND ")
 	return base, where, args
 }
 

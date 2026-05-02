@@ -497,6 +497,88 @@ func (p *postgresLog) ListRunsPage(ctx context.Context, opts RunPageOptions) (Ru
 	return RunPage{Runs: out, TotalMatching: total, Limit: opts.Limit, Offset: opts.Offset}, nil
 }
 
+func (p *postgresLog) PruneRuns(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	if err := ctx.Err(); err != nil {
+		return PruneReport{}, err
+	}
+	opts = normalizePruneOptions(opts)
+	if err := validatePruneOptions(opts); err != nil {
+		return PruneReport{}, err
+	}
+	if p.readOnly && !opts.DryRun {
+		return PruneReport{}, ErrReadOnly
+	}
+
+	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
+		return PruneReport{}, ErrLogClosed
+	}
+	p.mu.RUnlock()
+
+	base, where, args := pgPruneSQL(opts)
+	selectSQL := `WITH runs AS (` + base + `)
+		SELECT run_id, event_count FROM runs` + where +
+		` ORDER BY started_ts ASC, run_id ASC`
+	if opts.Limit > 0 {
+		selectSQL += fmt.Sprintf(` LIMIT $%d`, len(args)+1)
+		args = append(args, opts.Limit)
+	}
+	rows, err := p.db.QueryContext(ctx, selectSQL, args...)
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/postgres: prune select: %w", err)
+	}
+	defer rows.Close()
+
+	report := PruneReport{DryRun: opts.DryRun}
+	for rows.Next() {
+		var runID string
+		var eventCount int
+		if err := rows.Scan(&runID, &eventCount); err != nil {
+			return PruneReport{}, fmt.Errorf("eventlog/postgres: prune scan: %w", err)
+		}
+		report.RunIDs = append(report.RunIDs, runID)
+		report.MatchedRuns++
+		report.MatchedEvents += eventCount
+	}
+	if err := rows.Err(); err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/postgres: prune rows: %w", err)
+	}
+	if opts.DryRun || len(report.RunIDs) == 0 {
+		return report, nil
+	}
+
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/postgres: prune begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	ph := make([]string, len(report.RunIDs))
+	delArgs := make([]any, len(report.RunIDs))
+	for i, runID := range report.RunIDs {
+		ph[i] = fmt.Sprintf("$%d", i+1)
+		delArgs[i] = runID
+	}
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM eventlog_events WHERE run_id IN (`+strings.Join(ph, ", ")+`)`,
+		delArgs...,
+	)
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/postgres: prune delete: %w", err)
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/postgres: prune rows affected: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return PruneReport{}, fmt.Errorf("eventlog/postgres: prune commit: %w", err)
+	}
+	report.DeletedRuns = report.MatchedRuns
+	report.DeletedEvents = int(deleted)
+	return report, nil
+}
+
 func pgRunPageSQL(opts RunPageOptions) (base, where string, args []any) {
 	base = `
 		SELECT
@@ -517,6 +599,30 @@ func pgRunPageSQL(opts RunPageOptions) (base, where string, args []any) {
 	if len(parts) > 0 {
 		where = " WHERE " + strings.Join(parts, " AND ")
 	}
+	return base, where, args
+}
+
+func pgPruneSQL(opts PruneOptions) (base, where string, args []any) {
+	base = `
+		SELECT
+			e.run_id,
+			(SELECT ts   FROM eventlog_events e2 WHERE e2.run_id = e.run_id ORDER BY seq ASC  LIMIT 1) AS started_ts,
+			(SELECT kind FROM eventlog_events e3 WHERE e3.run_id = e.run_id ORDER BY seq DESC LIMIT 1) AS last_kind,
+			COUNT(*) AS event_count
+		FROM eventlog_events e
+		GROUP BY e.run_id`
+	terminal, inProgress := pruneAllowedKinds(opts)
+	args = append(args, runStartedAfterUnixNano(opts.Before))
+	conds := []runPageSQLCond{
+		{part: "started_ts < $1"},
+		runKindsSQLCond("last_kind", terminal, inProgress, numberedPlaceholder(2)),
+	}
+	parts := make([]string, 0, len(conds))
+	for _, cond := range conds {
+		parts = append(parts, cond.part)
+		args = append(args, cond.args...)
+	}
+	where = " WHERE " + strings.Join(parts, " AND ")
 	return base, where, args
 }
 

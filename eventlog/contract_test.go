@@ -748,6 +748,87 @@ func TestContract_ListRunsPage_FiltersAndPagination(t *testing.T) {
 	}
 }
 
+func TestContract_PruneRuns_DryRunAndStatusFilter(t *testing.T) {
+	completedPayload, err := event.EncodePayload(event.RunCompleted{FinalText: "ok"})
+	if err != nil {
+		t.Fatalf("EncodePayload completed: %v", err)
+	}
+	failedPayload, err := event.EncodePayload(event.RunFailed{Error: "boom", ErrorType: event.RunErrorInternal})
+	if err != nil {
+		t.Fatalf("EncodePayload failed: %v", err)
+	}
+
+	for _, bk := range backends(t) {
+		t.Run(bk.name, func(t *testing.T) {
+			log := bk.open(t)
+			pruner := log.(eventlog.RunPruner)
+			ctx := context.Background()
+
+			appendRun := func(id string, startTs int64, terminal event.Kind, terminalPayload []byte) {
+				t.Helper()
+				cb := &chainBuilder{}
+				ev := cb.next(t, id, id)
+				ev.Timestamp = startTs
+				encoded, err := event.Marshal(ev)
+				if err != nil {
+					t.Fatalf("Marshal start: %v", err)
+				}
+				cb.prevHash = event.Hash(encoded)
+				if err := log.Append(ctx, id, ev); err != nil {
+					t.Fatalf("append %s start: %v", id, err)
+				}
+				if terminal != 0 {
+					if err := log.Append(ctx, id, cb.nextKind(t, id, startTs+1, terminal, terminalPayload)); err != nil {
+						t.Fatalf("append %s terminal: %v", id, err)
+					}
+				}
+			}
+
+			appendRun("old-completed", 1_000_000, event.KindRunCompleted, completedPayload)
+			appendRun("old-failed", 2_000_000, event.KindRunFailed, failedPayload)
+			appendRun("old-progress", 3_000_000, 0, nil)
+			appendRun("new-completed", 9_000_000, event.KindRunCompleted, completedPayload)
+
+			dry, err := pruner.PruneRuns(ctx, eventlog.PruneOptions{
+				Before: time.Unix(0, 5_000_000),
+				DryRun: true,
+			})
+			if err != nil {
+				t.Fatalf("dry-run PruneRuns: %v", err)
+			}
+			if dry.MatchedRuns != 2 || dry.DeletedRuns != 0 || dry.MatchedEvents != 4 {
+				t.Fatalf("dry report = %+v", dry)
+			}
+			if evs, err := log.Read(ctx, "old-completed"); err != nil || len(evs) == 0 {
+				t.Fatalf("dry-run removed old-completed: len=%d err=%v", len(evs), err)
+			}
+
+			report, err := pruner.PruneRuns(ctx, eventlog.PruneOptions{
+				Before: time.Unix(0, 5_000_000),
+				Status: "completed",
+			})
+			if err != nil {
+				t.Fatalf("PruneRuns: %v", err)
+			}
+			if report.MatchedRuns != 1 || report.DeletedRuns != 1 || report.DeletedEvents != 2 {
+				t.Fatalf("delete report = %+v", report)
+			}
+			if evs, err := log.Read(ctx, "old-completed"); err != nil || len(evs) != 0 {
+				t.Fatalf("old-completed after prune len=%d err=%v", len(evs), err)
+			}
+			for _, id := range []string{"old-failed", "old-progress", "new-completed"} {
+				evs, err := log.Read(ctx, id)
+				if err != nil {
+					t.Fatalf("Read %s: %v", id, err)
+				}
+				if len(evs) == 0 {
+					t.Fatalf("%s was pruned unexpectedly", id)
+				}
+			}
+		})
+	}
+}
+
 func TestContract_ListRuns_AfterClose(t *testing.T) {
 	for _, bk := range backends(t) {
 		t.Run(bk.name, func(t *testing.T) {

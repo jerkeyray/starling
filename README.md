@@ -310,6 +310,7 @@ own agent factory.
 | --- | --- |
 | `validate <db> [<runID>]` | Hash-chain + Merkle check, one run or every run. |
 | `export <db> <runID>` | Dump events as NDJSON (pipe into `jq`). |
+| `prune [flags] <db>` | Delete old whole runs after an explicit dry-run. |
 | `inspect [flags] <db>` | Read-only web inspector. |
 | `replay <db> <runID>` | Headless replay. Dual-mode binaries only. |
 | `migrate <db>` | Apply pending schema migrations. |
@@ -331,6 +332,9 @@ own agent factory.
 - Use replay regression tests for critical agent workflows.
 - Store raw provider responses only when your privacy and retention policy
   allows it.
+- Export runs you must keep, then run `starling prune --older-than <duration>
+  --confirm <db>` as a scheduled retention job. Without `--confirm`, prune is
+  a dry-run report.
 
 ## Examples
 

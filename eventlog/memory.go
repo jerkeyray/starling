@@ -289,6 +289,67 @@ func (m *memoryLog) ListRunsPage(ctx context.Context, opts RunPageOptions) (RunP
 	return paginateRunSummaries(out, opts), nil
 }
 
+func (m *memoryLog) PruneRuns(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	if err := ctx.Err(); err != nil {
+		return PruneReport{}, err
+	}
+	opts = normalizePruneOptions(opts)
+	if err := validatePruneOptions(opts); err != nil {
+		return PruneReport{}, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return PruneReport{}, ErrLogClosed
+	}
+
+	report := PruneReport{DryRun: opts.DryRun}
+	for runID, rs := range m.runs {
+		if len(rs.events) == 0 {
+			continue
+		}
+		first := rs.events[0]
+		last := rs.events[len(rs.events)-1]
+		turns, tools, inTok, outTok, cost, durNs := aggregateRun(rs.events)
+		summary := RunSummary{
+			RunID:         runID,
+			StartedAt:     time.Unix(0, first.Timestamp),
+			LastSeq:       last.Seq,
+			TerminalKind:  last.Kind,
+			TurnCount:     turns,
+			ToolCallCount: tools,
+			InputTokens:   inTok,
+			OutputTokens:  outTok,
+			CostUSD:       cost,
+			DurationMs:    durNs / 1_000_000,
+		}
+		if !pruneSummaryMatches(summary, opts) {
+			continue
+		}
+		report.MatchedRuns++
+		report.MatchedEvents += len(rs.events)
+		report.RunIDs = append(report.RunIDs, runID)
+		if opts.Limit > 0 && report.MatchedRuns >= opts.Limit {
+			break
+		}
+	}
+	if opts.DryRun {
+		return report, nil
+	}
+	for _, runID := range report.RunIDs {
+		rs := m.runs[runID]
+		for _, sub := range rs.subscribers {
+			sub.close()
+		}
+		delete(m.runs, runID)
+	}
+	report.DeletedRuns = report.MatchedRuns
+	report.DeletedEvents = report.MatchedEvents
+	return report, nil
+}
+
 func (m *memoryLog) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
