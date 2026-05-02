@@ -150,6 +150,17 @@ streamable HTTP (`toolmcp.NewHTTP`), custom transports
 Per-call output is capped by `WithMaxOutputBytes` to keep run
 sizes bounded.
 
+## Built-in tools
+
+`tool/builtin` ships small stock tools for common examples.
+`builtin.Fetch()` performs a GET against public `http`/`https`
+URLs only: it rejects localhost, private networks, link-local
+addresses, multicast, unspecified addresses, and redirects that
+land on those targets. It is still a compact fetch primitive, not
+a browser or crawler; production agents should wrap or replace it
+when they need allowlists, auth, custom headers, content-type
+policy, or stricter retention controls.
+
 ## See also
 
 - [reference/events.md](events.md) - `ToolCallScheduled`,

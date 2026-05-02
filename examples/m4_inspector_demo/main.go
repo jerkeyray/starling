@@ -66,7 +66,8 @@ func main() {
 func seedHappyRun(ctx context.Context, log eventlog.EventLog, runID string, base time.Time) {
 	w := newWriter(log, runID, base)
 	w.append(event.KindRunStarted, event.RunStarted{
-		ModelID: "gpt-4o-mini", ProviderID: "openai", Goal: "say hi politely",
+		SchemaVersion: event.SchemaVersion,
+		ModelID:       "gpt-4o-mini", ProviderID: "openai", Goal: "say hi politely",
 	})
 	w.append(event.KindUserMessageAppended, event.UserMessageAppended{
 		Content: "hello, what time is it?",
@@ -93,7 +94,8 @@ func seedHappyRun(ctx context.Context, log eventlog.EventLog, runID string, base
 func seedFailedRun(ctx context.Context, log eventlog.EventLog, runID string, base time.Time) {
 	w := newWriter(log, runID, base)
 	w.append(event.KindRunStarted, event.RunStarted{
-		ModelID: "gpt-4o-mini", ProviderID: "openai", Goal: "fetch a flaky URL",
+		SchemaVersion: event.SchemaVersion,
+		ModelID:       "gpt-4o-mini", ProviderID: "openai", Goal: "fetch a flaky URL",
 	})
 	w.append(event.KindUserMessageAppended, event.UserMessageAppended{
 		Content: "fetch https://example.invalid",
@@ -114,7 +116,8 @@ func seedFailedRun(ctx context.Context, log eventlog.EventLog, runID string, bas
 func seedCancelledRun(ctx context.Context, log eventlog.EventLog, runID string, base time.Time) {
 	w := newWriter(log, runID, base)
 	w.append(event.KindRunStarted, event.RunStarted{
-		ModelID: "gpt-4o-mini", ProviderID: "openai", Goal: "long task",
+		SchemaVersion: event.SchemaVersion,
+		ModelID:       "gpt-4o-mini", ProviderID: "openai", Goal: "long task",
 	})
 	w.append(event.KindTurnStarted, event.TurnStarted{TurnID: "t1", InputTokens: 100})
 	w.finishCancelled(event.RunCancelled{Reason: "user_interrupt", DurationMs: 1200})
@@ -127,7 +130,8 @@ func seedCancelledRun(ctx context.Context, log eventlog.EventLog, runID string, 
 func seedInProgressRun(ctx context.Context, log eventlog.EventLog, runID string, base time.Time) {
 	w := newWriter(log, runID, base)
 	w.append(event.KindRunStarted, event.RunStarted{
-		ModelID: "gpt-4o-mini", ProviderID: "openai", Goal: "still going",
+		SchemaVersion: event.SchemaVersion,
+		ModelID:       "gpt-4o-mini", ProviderID: "openai", Goal: "still going",
 	})
 	w.append(event.KindUserMessageAppended, event.UserMessageAppended{
 		Content: "do the thing",

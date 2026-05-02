@@ -167,7 +167,7 @@ defer log.Close()
 ```
 
 Durable backends support schema preflight checks, migrations, validation, and
-retention workflows.
+read-only inspection workflows.
 
 ## Replay And Resume
 
